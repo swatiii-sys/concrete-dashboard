@@ -60,3 +60,4 @@ watchdog==6.0.0
 websockets==15.0.1
 yarl==1.25.1
 python-dotenv
+scikit-learn
