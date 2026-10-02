@@ -3,7 +3,7 @@ from supabase import create_client
 import pandas as pd
 import joblib
 
-# --- PAGE CONFIGURATION (Must be the first Streamlit command) ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Concrete Curing Analytics",
     page_icon="🏗️",
@@ -20,7 +20,7 @@ supabase = create_client(url, key)
 @st.cache_resource
 def load_model():
     try:
-       return joblib.load('ann_concrete_strength_model.pkl')
+        return joblib.load('ann_concrete_strength_model.pkl')
     except Exception as e:
         return None
 
@@ -30,7 +30,7 @@ model = load_model()
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 3. Login Screen (Centered and Professional)
+# 3. Authentication Screen (Login & Sign Up)
 if st.session_state.user is None:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -38,16 +38,30 @@ if st.session_state.user is None:
         st.markdown("<h4 style='text-align: center; color: gray;'>IoT Curing & Predictive Analytics</h4>", unsafe_allow_html=True)
         st.write("---")
         
-        email = st.text_input("Administrator Email")
-        password = st.text_input("Password", type="password")
+        # New Feature: Dual Tabs for Auth
+        tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Create Account"])
         
-        if st.button("Secure Login", use_container_width=True):
-            try:
-                response = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                st.session_state.user = response.user
-                st.rerun()
-            except Exception as e:
-                st.error("Authentication failed. Please verify your credentials.")
+        with tab_login:
+            email_login = st.text_input("Email", key="log_email")
+            password_login = st.text_input("Password", type="password", key="log_pass")
+            if st.button("Secure Login", use_container_width=True):
+                try:
+                    response = supabase.auth.sign_in_with_password({"email": email_login, "password": password_login})
+                    st.session_state.user = response.user
+                    st.rerun()
+                except Exception as e:
+                    st.error("Authentication failed. Please verify your credentials.")
+                    
+        with tab_signup:
+            st.info("Register a new account to access the dashboard.")
+            email_signup = st.text_input("New Email", key="sign_email")
+            password_signup = st.text_input("Create Password", type="password", key="sign_pass")
+            if st.button("Create Account", use_container_width=True):
+                try:
+                    response = supabase.auth.sign_up({"email": email_signup, "password": password_signup})
+                    st.success("Account created successfully! You can now log in using the Login tab.")
+                except Exception as e:
+                    st.error(f"Registration failed: {e}")
 
 # 4. Main Dashboard Application
 else:
@@ -58,7 +72,7 @@ else:
         if model:
             st.success("ML Engine Online")
         else:
-            st.warning("ML Engine Offline (Missing .pkl)")
+            st.warning("ML Engine Offline (Missing or incompatible .pkl)")
             
         st.write("---")
         if st.button("Logout", use_container_width=True):
@@ -168,16 +182,19 @@ else:
         st.write("")
         if st.button("Run Prediction Model", type="primary"):
             if model:
-                input_data = pd.DataFrame([[input_age, input_temp]], columns=['age_h', 'slab_temp'])
-                prediction = model.predict(input_data)[0]
-                
-                st.markdown(f"### **Predicted Strength:** {prediction:.2f} MPa")
-                
-                if prediction < 15:
-                    st.error("🔴 **DO NOT** remove framework.")
-                elif 15 <= prediction < 20:
-                    st.warning("🟡 Curing is progressing.")
-                else:
-                    st.success("🟢 **SAFE** to remove framework.")
+                try:
+                    input_data = pd.DataFrame([[input_age, input_temp]], columns=['age_h', 'slab_temp'])
+                    prediction = model.predict(input_data)[0]
+                    
+                    st.markdown(f"### **Predicted Strength:** {prediction:.2f} MPa")
+                    
+                    if prediction < 15:
+                        st.error("🔴 **DO NOT** remove framework.")
+                    elif 15 <= prediction < 20:
+                        st.warning("🟡 Curing is progressing.")
+                    else:
+                        st.success("🟢 **SAFE** to remove framework.")
+                except Exception as e:
+                    st.error(f"Model Execution Error: {e}. Ensure your model was trained on both 'age_h' and 'slab_temp'.")
             else:
-                st.error("Machine Learning model is offline. Please ensure 'concrete_strength_model.pkl' is uploaded to GitHub.")
+                st.error("Machine Learning model is offline. Please ensure 'ann_concrete_strength_model.pkl' is uploaded to GitHub.")
