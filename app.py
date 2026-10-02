@@ -20,7 +20,7 @@ supabase = create_client(url, key)
 @st.cache_resource
 def load_model():
     try:
-        return joblib.load('concrete_strength_model.pkl')
+       return joblib.load('ann_concrete_strength_model.pkl')
     except Exception as e:
         return None
 
