@@ -61,12 +61,6 @@ else:
             st.warning("ML Engine Offline (Missing .pkl)")
             
         st.write("---")
-        st.markdown("### 📂 Project Details")
-        st.write("**System:** IoT Concrete Curing Monitor")
-        st.write("**Department:** IIoT Engineering")
-        st.write("**Authors:** Swati Chhanikar & Aboli Watkar")
-        
-        st.write("---")
         if st.button("Logout", use_container_width=True):
             st.session_state.user = None
             st.rerun()
@@ -76,9 +70,7 @@ else:
     
     tab1, tab2, tab3 = st.tabs(["🔴 Live Sensor Stream", "📂 Offline CSV Analytics", "🧠 ML Prediction Engine"])
     
-    # Helper Function: Professional UI for displaying any dataframe
     def display_dashboard(df):
-        # NEW FEATURE: Top Level KPI Metrics
         if set(['age_h', 'slab_temp', 'strength_mpa']).issubset(df.columns):
             latest_temp = df['slab_temp'].iloc[-1]
             latest_strength = df['strength_mpa'].iloc[-1]
@@ -92,7 +84,6 @@ else:
             
             st.write("---")
             
-            # Charts layout
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
                 st.markdown("**Temperature Profile over Time**")
@@ -101,7 +92,6 @@ else:
                 st.markdown("**Strength Development Profile**")
                 st.line_chart(df, x="age_h", y="strength_mpa", color="#0068c9")
             
-            # Framework Removal System Logic
             st.write("---")
             st.markdown("### 🚦 Framework Removal Status")
             
@@ -114,7 +104,6 @@ else:
         else:
             st.warning("⚠️ Core columns ('age_h', 'slab_temp', 'strength_mpa') missing. Automated logic disabled.")
             
-        # NEW FEATURE: Collapsible Custom Graph Builder
         st.write("---")
         with st.expander("🛠️ Interactive Custom Graph Builder", expanded=False):
             st.markdown("Select any data columns from your dataset to generate custom visualizations:")
@@ -127,11 +116,9 @@ else:
             if x_axis and y_axis:
                 st.line_chart(df, x=x_axis, y=y_axis)
         
-        # Data Log & Export Button
         st.markdown("### 📋 Sensor Data Log")
         st.dataframe(df, use_container_width=True)
         
-        # NEW FEATURE: Data Export
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="⬇️ Export Data Log as CSV",
