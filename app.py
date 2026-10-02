@@ -27,23 +27,21 @@ if st.session_state.user is None:
         except Exception as e:
             st.error("Login failed. Please check your credentials.")
 
-# 4. Main Dashboard (Only visible after login)
+# 4. Main Dashboard
 else:
     st.title("Live Concrete Curing Dashboard")
     if st.sidebar.button("Logout"):
         st.session_state.user = None
         st.rerun()
 
-    # Create Navigation Tabs
     tab1, tab2 = st.tabs(["🔴 Live Data (Supabase)", "📂 Upload CSV Data"])
     
-    # Helper Function: Draws charts and calculates alerts for ANY data provided
     def display_dashboard(df):
         st.subheader("Curing Metrics")
-        col1, col2 = st.columns(2)
         
-        # Ensure the CSV has the correct columns before drawing charts
+        # Check if the core concrete columns exist for the automated warnings
         if set(['age_h', 'slab_temp', 'strength_mpa']).issubset(df.columns):
+            col1, col2 = st.columns(2)
             with col1:
                 st.write("Slab Temperature (°C)")
                 st.line_chart(df, x="age_h", y="slab_temp")
@@ -61,11 +59,28 @@ else:
                 st.warning(f"🟡 CAUTION: Concrete strength is {latest_strength:.1f} MPa. Curing is progressing.")
             else:
                 st.success(f"🟢 SAFE: Target achieved at {latest_strength:.1f} MPa. Framework can be safely removed.")
-                
-            st.write("### Raw Data Log")
-            st.dataframe(df.tail(10))
         else:
-            st.error("Error: Your CSV must contain columns named exactly 'age_h', 'slab_temp', and 'strength_mpa'.")
+            st.warning("⚠️ Core columns ('age_h', 'slab_temp', 'strength_mpa') missing from this data. Automated framework warnings are disabled.")
+            
+        # --- NEW FEATURE: INTERACTIVE GRAPH BUILDER ---
+        st.write("---")
+        st.subheader("📊 Custom Graph Builder")
+        st.write("Select any data columns from your file to generate new graphs:")
+        
+        col_x, col_y = st.columns(2)
+        with col_x:
+            # Dropdown for X-Axis (defaults to the first column)
+            x_axis = st.selectbox("Select X-Axis", df.columns, index=0)
+        with col_y:
+            # Dropdown for Y-Axis (defaults to the second column if it exists)
+            y_axis = st.selectbox("Select Y-Axis", df.columns, index=min(1, len(df.columns)-1))
+        
+        # Draw the custom graph based on user selection
+        if x_axis and y_axis:
+            st.line_chart(df, x=x_axis, y=y_axis)
+            
+        st.write("### Raw Data Log")
+        st.dataframe(df)
 
     # --- TAB 1: Live Supabase Data ---
     with tab1:
