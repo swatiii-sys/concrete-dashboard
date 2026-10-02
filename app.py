@@ -30,7 +30,7 @@ model = load_model()
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 3. Authentication Screen (Login & Sign Up)
+# 3. Authentication Screen (Login, Sign Up, Reset Password)
 if st.session_state.user is None:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -38,9 +38,9 @@ if st.session_state.user is None:
         st.markdown("<h4 style='text-align: center; color: gray;'>IoT Curing & Predictive Analytics</h4>", unsafe_allow_html=True)
         st.write("---")
         
-        # New Feature: Dual Tabs for Auth
-        tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Create Account"])
+        tab_login, tab_signup, tab_reset = st.tabs(["🔒 Login", "📝 Create Account", "🔑 Reset Password"])
         
+        # --- LOGIN TAB ---
         with tab_login:
             email_login = st.text_input("Email", key="log_email")
             password_login = st.text_input("Password", type="password", key="log_pass")
@@ -50,23 +50,67 @@ if st.session_state.user is None:
                     st.session_state.user = response.user
                     st.rerun()
                 except Exception as e:
-                    st.error("Authentication failed. Please verify your credentials.")
+                    st.error("Authentication failed. Please verify your credentials or ensure your email is verified.")
                     
+        # --- SIGN UP TAB (WITH OTP) ---
         with tab_signup:
-            st.info("Register a new account to access the dashboard.")
-            email_signup = st.text_input("New Email", key="sign_email")
-            password_signup = st.text_input("Create Password", type="password", key="sign_pass")
-            if st.button("Create Account", use_container_width=True):
+            if "awaiting_otp" not in st.session_state:
+                st.session_state.awaiting_otp = False
+                st.session_state.signup_email = ""
+
+            if not st.session_state.awaiting_otp:
+                st.info("Register a new account. We will send an OTP to verify your email.")
+                email_signup = st.text_input("New Email", key="sign_email")
+                password_signup = st.text_input("Create Password", type="password", key="sign_pass")
+                
+                if st.button("Send OTP", use_container_width=True):
+                    try:
+                        supabase.auth.sign_up({"email": email_signup, "password": password_signup})
+                        st.session_state.awaiting_otp = True
+                        st.session_state.signup_email = email_signup
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Registration failed: {e}")
+            else:
+                st.success(f"An OTP has been sent to **{st.session_state.signup_email}**.")
+                otp_code = st.text_input("Enter 6-digit OTP", key="otp_input")
+                
+                if st.button("Verify OTP & Create Account", use_container_width=True):
+                    try:
+                        supabase.auth.verify_otp({"email": st.session_state.signup_email, "token": otp_code, "type": "signup"})
+                        st.success("Account verified! You can now switch to the Login tab.")
+                        st.session_state.awaiting_otp = False 
+                    except Exception as e:
+                        st.error("Invalid OTP code. Please try again.")
+                
+                if st.button("Start Over", variant="tertiary"):
+                    st.session_state.awaiting_otp = False
+                    st.rerun()
+                    
+        # --- RESET PASSWORD TAB ---
+        with tab_reset:
+            st.info("Enter your registered email to receive a password reset link.")
+            reset_email = st.text_input("Account Email", key="res_email")
+            if st.button("Send Reset Link", use_container_width=True):
                 try:
-                    response = supabase.auth.sign_up({"email": email_signup, "password": password_signup})
-                    st.success("Account created successfully! You can now log in using the Login tab.")
+                    # Supabase will send a secure reset link to this email
+                    supabase.auth.reset_password_email(reset_email)
+                    st.success("Reset link sent! Please check your inbox.")
                 except Exception as e:
-                    st.error(f"Registration failed: {e}")
+                    st.error(f"Failed to send reset request: {e}")
 
 # 4. Main Dashboard Application
 else:
-    # --- SIDEBAR UI ---
+    # --- SIDEBAR UI WITH USER PROFILE ---
     with st.sidebar:
+        st.markdown("### 👤 User Profile")
+        user_email = st.session_state.user.email
+        # Mask the long Supabase user ID for a cleaner look
+        short_id = st.session_state.user.id[:8] + "..." 
+        
+        st.info(f"**Operator:** Swati Chhanikar\n\n**Dept:** IIoT Engineering\n\n**Email:** {user_email}\n\n**Sys ID:** {short_id}")
+        
+        st.write("---")
         st.markdown("### ⚙️ System Status")
         st.success("Database Connected")
         if model:
@@ -116,7 +160,7 @@ else:
             else:
                 st.success(f"🟢 **SAFE TO PROCEED:** Target achieved at {latest_strength:.1f} MPa. Framework can be safely removed.")
         else:
-            st.warning("⚠️ Core columns ('age_h', 'slab_temp', 'strength_mpa') missing. Automated logic disabled.")
+            st.warning("⚠️️ Core columns ('age_h', 'slab_temp', 'strength_mpa') missing. Automated logic disabled.")
             
         st.write("---")
         with st.expander("🛠️ Interactive Custom Graph Builder", expanded=False):
