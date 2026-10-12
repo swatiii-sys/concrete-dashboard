@@ -15,8 +15,9 @@ st.set_page_config(
 # 1. Supabase connection -------------------------------------------------
 # Best practice: set SUPABASE_URL and SUPABASE_KEY in Render > Environment.
 # The defaults below are your existing values (publishable key only).
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://icneaaqjtrlujhwqtnrs.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq")
+# 1. Supabase connection -------------------------------------------------
+SUPABASE_URL = "https://icneaaqjtrlujhwqtnrs.supabase.co"
+SUPABASE_KEY = "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq"
 
 # FIX: keep ONE client per browser session so the login session is not lost on rerun
 if "supabase" not in st.session_state:
