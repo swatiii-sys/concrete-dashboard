@@ -21,9 +21,8 @@ st.set_page_config(
 )
 
 # Put these in Render > Environment (recommended). Defaults = your publishable key.
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://icneaaqjtrlujhwqtnrs.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq")
-
+SUPABASE_URL = "https://icneaaqjtrlujhwqtnrs.supabase.co"
+SUPABASE_KEY = "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq"
 if "supabase" not in st.session_state:
     st.session_state.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 supabase = st.session_state.supabase
