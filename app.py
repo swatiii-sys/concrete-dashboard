@@ -101,7 +101,7 @@ DEFAULTS = {
             "time": datetime.now().strftime("%d %b %H:%M:%S"),
             "to": "+91 98765 43210 (Delivered)",
             "mode": "Summer Mode",
-            "msg": "Water Curing Alert: Slab A-04 temperature stable at 28.0 C (IS 516 Optimal Range).",
+            "msg": "Water Curing Alert: Slab A-04 temperature stable at 28.0°C (IS 516 Optimal Range).",
         }
     ],
     "chat_history": [
@@ -579,7 +579,15 @@ elif page == "Water Curing & SMS":
     with c1:
         st.markdown("### 💧 Water Curing & SMS Settings")
         st.text_input("Registered Mobile No (SMS)", key="phone_number")
-        st.selectbox("Active Season / Weather Mode", ["Summer Mode", "Winter Mode", "Rainy / Monsoon Mode"], key="weather_mode")
+        # FIXED: Use unique key 'curing_season_select' instead of duplicate 'weather_mode'
+        selected_season = st.selectbox(
+            "Active Season / Weather Mode",
+            ["Summer Mode", "Winter Mode", "Rainy / Monsoon Mode"],
+            index=["Summer Mode", "Winter Mode", "Rainy / Monsoon Mode"].index(st.session_state.weather_mode),
+            key="curing_season_select",
+        )
+        st.session_state.weather_mode = selected_season
+        
         st.number_input("High Temp Threshold (°C) [Water Spray Trigger]", min_value=25.0, max_value=50.0, step=0.5, key="high_temp")
         st.number_input("Low Temp Threshold (°C) [Winter Blanket Alert]", min_value=0.0, max_value=24.0, step=0.5, key="low_temp")
         st.toggle("Enable Automated SMS Gateway", key="sms_enabled")
