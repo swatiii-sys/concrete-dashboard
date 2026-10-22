@@ -21,8 +21,14 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------ SUPABASE CONNECTION
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://icneaaqjtrlujhwqtnrs.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq")
+DEFAULT_URL = "https://icneaaqjtrlujhwqtnrs.supabase.co"
+DEFAULT_KEY = "sb_publishable_SW2ROPWfLIpC4TdnAXV_Mg_oqc0STTq"
+
+raw_url = os.environ.get("SUPABASE_URL", "").strip().strip('"').strip("'")
+raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
+
+SUPABASE_URL = raw_url if raw_url.startswith("https://") else DEFAULT_URL
+SUPABASE_KEY = raw_key if raw_key else DEFAULT_KEY
 
 if "supabase" not in st.session_state:
     st.session_state.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
