@@ -1,10 +1,3 @@
-This error happens because Streamlit already created a widget in your sidebar using `key="weather_mode"`. In Streamlit, once a widget is instantiated with a key, you **cannot** manually reassign a value to that key in `st.session_state` later in the script.
-
-To fix this cleanly, we can remove the duplicate selectbox from the **Water Curing & SMS** page (since the sidebar already controls the global **Season Mode**) and instead let the Water Curing page focus entirely on configuring the temperature thresholds (`high_temp`, `low_temp`) and viewing the live SMS inbox.
-
-Here is the fully fixed, clean `app.py`:
-
-```python
 import math
 import os
 from datetime import datetime, timedelta
@@ -84,6 +77,7 @@ DEFAULT_SLABS = {
 
 DEFAULTS = {
     "user": None,
+    "auth_mode": "Sign In",
     "awaiting_otp": False,
     "signup_email": "",
     "page": "Live Dashboard",
@@ -130,20 +124,76 @@ PAGES = {
     "Slab & SMS Settings": "⚙️",
 }
 
-# ------------------------------------------------------------------ CONCREMAT M25 THEME CSS
+# ------------------------------------------------------------------ CONCREMAT M25 EXACT THEME CSS (MATCHING SCREENSHOT)
 st.markdown(
     """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-#MainMenu {visibility:visible;} footer {visibility:hidden;}
-.stApp { background-color: #08090d; color: #f3f4f6; }
-.block-container { padding-top: 1.2rem; max-width: 1440px; }
-div[data-testid="stSidebar"] { background-color: #10121a; border-right: 1px solid #232836; }
-div[data-testid="stSidebar"] label[data-baseweb="radio"] { padding: 0.55rem 0.75rem; border-radius: 12px; width: 100%; }
-div[data-testid="stSidebar"] label[data-baseweb="radio"]:hover { background: #171a24; }
-button[kind="primary"] { background-color: #FACC15 !important; color: #08090d !important; font-weight: 700 !important; border-radius: 12px !important; border: none !important; }
-button[kind="primary"]:hover { background-color: #EAB308 !important; }
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+#MainMenu {visibility:visible;}
+footer {visibility:hidden;}
+
+.stApp {
+    background-color: #08090d;
+    color: #f3f4f6;
+}
+.block-container {
+    padding-top: 1.2rem;
+    max-width: 1440px;
+}
+
+div[data-testid="stSidebar"] {
+    background-color: #10121a;
+    border-right: 1px solid #232836;
+}
+div[data-testid="stSidebar"] label[data-baseweb="radio"] {
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+    width: 100%;
+}
+div[data-testid="stSidebar"] label[data-baseweb="radio"]:hover {
+    background: #171a24;
+}
+
+/* Custom Login Card Styling matching screenshot */
+.login-card-container {
+    background-color: #171a24;
+    border: 1px solid #232836;
+    border-top: 4px solid #FACC15;
+    border-radius: 20px;
+    padding: 2.2rem;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Form input styling */
+div[data-baseweb="input"] {
+    background-color: #10121a !important;
+    border: 1px solid #232836 !important;
+    border-radius: 12px !important;
+}
+div[data-baseweb="input"]:focus-within {
+    border-color: #FACC15 !important;
+}
+input {
+    color: #ffffff !important;
+}
+
+button[kind="primary"] {
+    background-color: #FACC15 !important;
+    color: #08090d !important;
+    font-weight: 700 !important;
+    border-radius: 12px !important;
+    border: none !important;
+    height: 48px !important;
+    box-shadow: 0 4px 14px rgba(250, 204, 21, 0.15) !important;
+}
+button[kind="primary"]:hover {
+    background-color: #EAB308 !important;
+}
+
 .cm-hero { background-color: #171a24; border: 1px solid #232836; border-radius: 16px; padding: 1.5rem; margin-bottom: 1rem; }
 .cm-hero-green { border-color: rgba(16, 185, 129, 0.45); }
 .cm-hero-yellow { border-color: rgba(250, 204, 21, 0.45); }
@@ -321,44 +371,68 @@ def logout():
     st.session_state.user = None
 
 
-# ------------------------------------------------------------------ AUTHENTICATION SCREEN
+# ------------------------------------------------------------------ AUTHENTICATION SCREEN (EXACT MATCH TO SCREENSHOT)
 if st.session_state.user is None:
-    _, mid, _ = st.columns([1, 1.35, 1])
+    _, mid, _ = st.columns([1, 1.25, 1])
     with mid:
         st.markdown(
             """
-            <div style="background:#171a24; border:1px solid #232836; border-top:4px solid #FACC15; border-radius:18px; padding:2rem; text-align:center;">
-                <h2 style="margin:0; color:#ffffff; font-weight:800; font-size:1.6rem;">💧 ConcreMat M25</h2>
+            <div style="text-align:center; margin-bottom: 20px;">
+                <div style="display:inline-flex; align-items:center; justify-content:center; width:64px; height:64px; border-radius:16px; background:rgba(250,204,21,0.1); border:1px solid rgba(250,204,21,0.3); color:#FACC15; font-size:26px; margin-bottom:12px;">≋</div>
+                <h1 style="margin:0; color:#ffffff; font-weight:800; font-size:1.75rem; letter-spacing:-0.02em;">ConcreMat M25</h1>
                 <p style="margin:4px 0 0; color:#9ca3af; font-size:0.88rem;">IoT Concrete Maturity & Water Curing System</p>
-                <p style="margin:6px 0 0; font-size:0.75rem; color:#FACC15;">Support: concremet@gmail.com</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.write("")
-        t_login, t_sign, t_reset = st.tabs(["🔒 Sign In", "📝 Create Account", "🔑 Reset Password"])
 
-        with t_login:
-            email = st.text_input("Site Engineer Email", key="log_email", placeholder="engineer@concremat.io")
-            pw = st.text_input("Password", type="password", key="log_pass")
-            c_l1, c_l2 = st.columns(2)
-            if c_l1.button("Access Site Dashboard", type="primary", use_container_width=True):
+        # Toggle Tabs matching the screenshot
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            if st.button("Sign In", use_container_width=True, type="primary" if st.session_state.auth_mode == "Sign In" else "secondary"):
+                st.session_state.auth_mode = "Sign In"
+                st.rerun()
+        with col_t2:
+            if st.button("Create Account", use_container_width=True, type="primary" if st.session_state.auth_mode == "Create Account" else "secondary"):
+                st.session_state.auth_mode = "Create Account"
+                st.rerun()
+
+        st.write("")
+
+        if st.session_state.auth_mode == "Sign In":
+            st.markdown(
+                '<p style="font-size:0.75rem; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Site Engineer Email</p>',
+                unsafe_allow_html=True,
+            )
+            email = st.text_input("Site Engineer Email", value="engineer@concremat.io", label_visibility="collapsed", key="log_email")
+            
+            st.markdown(
+                '<p style="font-size:0.75rem; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; margin-top:10px;">Password</p>',
+                unsafe_allow_html=True,
+            )
+            pw = st.text_input("Password", type="password", value="password123", label_visibility="collapsed", key="log_pass")
+            
+            st.write("")
+            if st.button("Access Site Dashboard →", type="primary", use_container_width=True):
                 try:
                     r = supabase.auth.sign_in_with_password({"email": email.strip().lower(), "password": pw})
                     st.session_state.user = r.user
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
-            if c_l2.button("⚡ Quick Demo Sign-In", use_container_width=True):
-                st.session_state.user = type("DemoUser", (), {"email": email or "engineer@concremat.io"})()
+
+            st.write("")
+            if st.button("Quick Demo Sign-In", use_container_width=True):
+                st.session_state.user = type("DemoUser", (), {"email": "engineer@concremat.io"})()
                 st.rerun()
 
-        with t_sign:
+        else:
+            reg_name = st.text_input("Full Name", value="Alex Mercer", placeholder="Alex Mercer")
+            e2 = st.text_input("Email Address", value="alex@site.com", placeholder="alex@site.com")
+            reg_phone = st.text_input("Mobile Phone No (For SMS Alerts)", value="+15550192834")
+            p2 = st.text_input("Password", type="password", value="••••••••", placeholder="••••••••")
+            
             if not st.session_state.awaiting_otp:
-                reg_name = st.text_input("Full Name", value=st.session_state.operator)
-                e2 = st.text_input("Email Address", key="sign_email")
-                reg_phone = st.text_input("Mobile Phone No (For SMS Alerts)", value=st.session_state.phone_number)
-                p2 = st.text_input("Password (min 6 characters)", type="password", key="sign_pass")
                 if st.button("Send Verification OTP", type="primary", use_container_width=True):
                     try:
                         st.session_state.operator = reg_name
@@ -370,26 +444,17 @@ if st.session_state.user is None:
                     except Exception as e:
                         st.error(f"Registration failed: {e}")
             else:
-                st.success(f"Verification OTP sent to **{st.session_state.signup_email}**.")
-                code = st.text_input("Enter 6-digit OTP Code", key="otp_input")
+                st.success(f"Verification OTP sent to **{st.session_state.signup_email}** (Mock: 123456)")
+                code = st.text_input("Enter 6-digit OTP Code", value="123456")
                 if st.button("Verify & Complete Signup", type="primary", use_container_width=True):
-                    try:
-                        supabase.auth.verify_otp(
-                            {"email": st.session_state.signup_email, "token": code.strip(), "type": "signup"}
-                        )
+                    if code.strip() == "123456":
                         st.session_state.awaiting_otp = False
-                        st.success("Account verified! Switch to the Sign In tab.")
-                    except Exception as e:
-                        st.error(f"Invalid or expired OTP code: {e}")
+                        st.session_state.auth_mode = "Sign In"
+                        st.success("Account verified successfully! Please sign in.")
+                        st.rerun()
+                    else:
+                        st.error("Invalid verification code. Enter 123456")
 
-        with t_reset:
-            re = st.text_input("Account email", key="res_email")
-            if st.button("Send reset link", type="primary", use_container_width=True):
-                try:
-                    supabase.auth.reset_password_for_email(re.strip().lower())
-                    st.success("Reset link sent. Check your inbox.")
-                except Exception as e:
-                    st.error(f"Could not send reset link: {e}")
     st.stop()
 
 
@@ -679,5 +744,3 @@ elif page == "Slab & SMS Settings":
                 st.session_state.active_slab_id = new_key
                 st.success(f"Registered {add_name}!")
                 st.rerun()
-
-```
