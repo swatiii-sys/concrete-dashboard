@@ -1,3 +1,10 @@
+This error happens because Streamlit already created a widget in your sidebar using `key="weather_mode"`. In Streamlit, once a widget is instantiated with a key, you **cannot** manually reassign a value to that key in `st.session_state` later in the script.
+
+To fix this cleanly, we can remove the duplicate selectbox from the **Water Curing & SMS** page (since the sidebar already controls the global **Season Mode**) and instead let the Water Curing page focus entirely on configuring the temperature thresholds (`high_temp`, `low_temp`) and viewing the live SMS inbox.
+
+Here is the fully fixed, clean `app.py`:
+
+```python
 import math
 import os
 from datetime import datetime, timedelta
@@ -579,15 +586,7 @@ elif page == "Water Curing & SMS":
     with c1:
         st.markdown("### 💧 Water Curing & SMS Settings")
         st.text_input("Registered Mobile No (SMS)", key="phone_number")
-        # FIXED: Use unique key 'curing_season_select' instead of duplicate 'weather_mode'
-        selected_season = st.selectbox(
-            "Active Season / Weather Mode",
-            ["Summer Mode", "Winter Mode", "Rainy / Monsoon Mode"],
-            index=["Summer Mode", "Winter Mode", "Rainy / Monsoon Mode"].index(st.session_state.weather_mode),
-            key="curing_season_select",
-        )
-        st.session_state.weather_mode = selected_season
-        
+        st.info(f"Active Curing Season (controlled via sidebar): **{st.session_state.weather_mode}**")
         st.number_input("High Temp Threshold (°C) [Water Spray Trigger]", min_value=25.0, max_value=50.0, step=0.5, key="high_temp")
         st.number_input("Low Temp Threshold (°C) [Winter Blanket Alert]", min_value=0.0, max_value=24.0, step=0.5, key="low_temp")
         st.toggle("Enable Automated SMS Gateway", key="sms_enabled")
@@ -680,3 +679,5 @@ elif page == "Slab & SMS Settings":
                 st.session_state.active_slab_id = new_key
                 st.success(f"Registered {add_name}!")
                 st.rerun()
+
+```
