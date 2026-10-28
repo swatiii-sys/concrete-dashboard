@@ -36,6 +36,21 @@ if create_client and SUPABASE_URL.startswith("https://") and SUPABASE_KEY:
     except Exception:
         supabase = None
 
+# ============================================================== SMS KEY (Fast2SMS)
+FAST2SMS_API_KEY = "txb_ZFh9NVFAtvw4XUgYpNFIv7bn8baH2F9v"
+
+
+def get_sms_key() -> str:
+    """Secrets / environment variable first, otherwise the key above."""
+    try:
+        k = str(st.secrets["FAST2SMS_API_KEY"]).strip()
+        if k:
+            return k
+    except Exception:
+        pass
+    return os.environ.get("FAST2SMS_API_KEY", "").strip() or FAST2SMS_API_KEY
+
+
 # ============================================================== CONSTANTS / DEFAULTS
 GRADES = {"M20": 20.0, "M25": 25.0, "M30": 30.0, "M35": 35.0, "M40": 40.0}
 CUBE_AGES = [3, 7, 14, 21, 28]
@@ -278,20 +293,25 @@ def alert_state(temp: float):
 
 
 def send_sms(phone: str, message: str) -> str:
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    key = os.environ.get("FAST2SMS_API_KEY", "").strip()
-    if key:
-        try:
-            r = requests.post(
-                "https://www.fast2sms.com/dev/bulkV2",
-                headers={"authorization": key},
-                data={"route": "q", "message": message, "language": "english", "flash": 0, "numbers": digits[-10:]},
-                timeout=8,
-            )
-            return "Delivered" if r.status_code == 200 else f"Gateway status {r.status_code}"
-        except Exception as e:
-            return f"Error: {e}"
-    return "No SMS gateway configured"
+    digits = "".join(ch for ch in phone if ch.isdigit())[-10:]
+    if len(digits) != 10:
+        return "Invalid phone number"
+    key = get_sms_key()
+    if not key:
+        return "No SMS gateway configured"
+    try:
+        r = requests.post(
+            "https://www.fast2sms.com/dev/bulkV2",
+            headers={"authorization": key},
+            data={"route": "q", "message": message, "language": "english", "flash": 0, "numbers": digits},
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("return") is True:
+            return "Delivered"
+        return f"Failed: {data.get('message', r.text)}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def handle_alert(temp: float):
@@ -594,6 +614,14 @@ def page_alerts():
             st.session_state.sms_enabled = st.toggle("Enable SMS alerts", value=st.session_state.sms_enabled, key="a_sms")
             st.session_state.phone = st.text_input("Mobile number", value=st.session_state.phone, placeholder="+91 98765 43210", key="a_phone")
             st.caption("Set FAST2SMS_API_KEY in your environment to send real SMS.")
+            if st.button("📨 Send Test SMS", key="a_test", use_container_width=True):
+                if not st.session_state.phone:
+                    st.error("Enter a mobile number first.")
+                else:
+                    msg = "ConcreMat test alert: SMS is working."
+                    status = send_sms(st.session_state.phone, msg)
+                    st.session_state.sms_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": st.session_state.phone, "Status": status, "Message": msg})
+                    (st.success if status == "Delivered" else st.error)(f"SMS status: {status}")
     with c2:
         kpi_row(df)
         st.write("")
