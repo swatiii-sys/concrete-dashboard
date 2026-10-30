@@ -5,6 +5,7 @@ Professional multi-tab Streamlit dashboard.
 Run:  streamlit run app.py
 """
 import os
+import time
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -35,21 +36,6 @@ if create_client and SUPABASE_URL.startswith("https://") and SUPABASE_KEY:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception:
         supabase = None
-
-# ============================================================== SMS KEY (Fast2SMS)
-FAST2SMS_API_KEY = "txb_ZFh9NVFAtvw4XUgYpNFIv7bn8baH2F9v"
-
-
-def get_sms_key() -> str:
-    """Secrets / environment variable first, otherwise the key above."""
-    try:
-        k = str(st.secrets["FAST2SMS_API_KEY"]).strip()
-        if k:
-            return k
-    except Exception:
-        pass
-    return os.environ.get("FAST2SMS_API_KEY", "").strip() or FAST2SMS_API_KEY
-
 
 # ============================================================== CONSTANTS / DEFAULTS
 GRADES = {"M20": 20.0, "M25": 25.0, "M30": 30.0, "M35": 35.0, "M40": 40.0}
@@ -93,10 +79,10 @@ DEFAULT_STATE = {
     "auto_refresh": False,
     "refresh_s": 10,
     "operator": "Site Engineer",
-    "phone": "",
-    "sms_enabled": False,
-    "last_alert_key": None,
-    "sms_log": [],
+    "alert_log": [],
+    "email_enabled": False,    # ThingSpeak email alerts
+    "email_gap_min": 10,       # min minutes between alert emails
+    "last_email_ts": 0.0,
     "project": "Slab Curing System",
 }
 for _k, _v in DEFAULT_STATE.items():
@@ -292,39 +278,21 @@ def alert_state(temp: float):
     return triggered, thr, typ
 
 
-def send_sms(phone: str, message: str) -> str:
-    digits = "".join(ch for ch in phone if ch.isdigit())[-10:]
-    if len(digits) != 10:
-        return "Invalid phone number"
-    key = get_sms_key()
-    if not key:
-        return "No SMS gateway configured"
-    try:
-        r = requests.post(
-            "https://www.fast2sms.com/dev/bulkV2",
-            headers={"authorization": key},
-            data={"route": "q", "message": message, "language": "english", "flash": 0, "numbers": digits},
-            timeout=10,
-        )
-        data = r.json()
-        if data.get("return") is True:
-            return "Delivered"
-        return f"Failed: {data.get('message', r.text)}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
 def handle_alert(temp: float):
     triggered, thr, typ = alert_state(temp)
     if not triggered:
-        st.session_state.last_alert_key = None
         return
-    key = f"{typ}-{int(thr)}-{int(temp)}"
-    if st.session_state.sms_enabled and st.session_state.phone and st.session_state.last_alert_key != key:
-        st.session_state.last_alert_key = key
-        msg = f"Concrete alert: core temp {temp:.1f}C is {typ.lower()} limit {thr:.0f}C."
-        status = send_sms(st.session_state.phone, msg)
-        st.session_state.sms_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": st.session_state.phone, "Status": status, "Message": msg})
+
+    # Email via ThingSpeak, throttled so a hot slab doesn't flood the inbox
+    if st.session_state.email_enabled:
+        gap_s = float(st.session_state.email_gap_min) * 60
+        if time.time() - float(st.session_state.last_email_ts) >= gap_s:
+            st.session_state.last_email_ts = time.time()
+            subject = f"Concrete Temperature Alert: {temp:.1f} C"
+            msg = (f"{st.session_state.project}: core temperature {temp:.1f} C is {typ.lower()} "
+                   f"the limit of {thr:.0f} C at {datetime.now().strftime('%d %b %Y %H:%M:%S')}.")
+            status = send_email_alert(subject, msg)
+            st.session_state.alert_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": "Email (ThingSpeak)", "Status": status, "Message": msg})
 
 
 # ============================================================== PLOTLY HELPERS (light theme)
@@ -610,18 +578,18 @@ def page_alerts():
     with c1:
         card_alert("a")
         with st.container(border=True):
-            st.markdown('<div class="card-title">SMS Notifications</div>', unsafe_allow_html=True)
-            st.session_state.sms_enabled = st.toggle("Enable SMS alerts", value=st.session_state.sms_enabled, key="a_sms")
-            st.session_state.phone = st.text_input("Mobile number", value=st.session_state.phone, placeholder="+91 98765 43210", key="a_phone")
-            st.caption("Set FAST2SMS_API_KEY in your environment to send real SMS.")
-            if st.button("📨 Send Test SMS", key="a_test", use_container_width=True):
-                if not st.session_state.phone:
-                    st.error("Enter a mobile number first.")
-                else:
-                    msg = "ConcreMat test alert: SMS is working."
-                    status = send_sms(st.session_state.phone, msg)
-                    st.session_state.sms_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": st.session_state.phone, "Status": status, "Message": msg})
-                    (st.success if status == "Delivered" else st.error)(f"SMS status: {status}")
+            st.markdown('<div class="card-title">Email Notifications (ThingSpeak)</div>', unsafe_allow_html=True)
+            st.session_state.email_enabled = st.toggle("Enable email alerts", value=st.session_state.email_enabled, key="a_email")
+            st.session_state.email_gap_min = st.number_input("Minimum minutes between emails", min_value=1, max_value=1440, value=int(st.session_state.email_gap_min), step=1, key="a_email_gap")
+            if get_alert_key():
+                st.caption("Emails go to the ThingSpeak account that owns your Alerts API key.")
+            else:
+                st.warning("Set THINGSPEAK_ALERT_KEY (environment variable or Streamlit secret) to send emails.")
+            if st.button("✉️ Send Test Email", key="a_test_email", use_container_width=True):
+                msg = "ConcreMat test alert: email is working."
+                status = send_email_alert("Concrete Monitor Test", msg)
+                st.session_state.alert_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": "Email (ThingSpeak)", "Status": status, "Message": msg})
+                (st.success if status == "Sent" else st.error)(f"Email status: {status}")
     with c2:
         kpi_row(df)
         st.write("")
@@ -630,8 +598,8 @@ def page_alerts():
             st.plotly_chart(fig_live(df, 320), use_container_width=True)
         with st.container(border=True):
             st.markdown('<div class="card-title">Alert History</div>', unsafe_allow_html=True)
-            if st.session_state.sms_log:
-                st.dataframe(pd.DataFrame(st.session_state.sms_log), hide_index=True, use_container_width=True)
+            if st.session_state.alert_log:
+                st.dataframe(pd.DataFrame(st.session_state.alert_log), hide_index=True, use_container_width=True)
             else:
                 st.caption("No alerts sent yet.")
 
@@ -664,8 +632,7 @@ def page_settings():
             st.markdown('<div class="card-title">Project & Operator</div>', unsafe_allow_html=True)
             st.session_state.project = st.text_input("Project name", value=st.session_state.project, key="s_proj")
             st.session_state.operator = st.text_input("Operator", value=st.session_state.operator, key="s_op")
-            st.session_state.phone = st.text_input("Mobile number (SMS)", value=st.session_state.phone, key="s_ph")
-            st.session_state.sms_enabled = st.toggle("Enable SMS alerts", value=st.session_state.sms_enabled, key="s_sms")
+            st.session_state.email_enabled = st.toggle("Enable email alerts (ThingSpeak)", value=st.session_state.email_enabled, key="s_email")
         if st.button("Sign out", use_container_width=True):
             try:
                 if supabase:
@@ -692,7 +659,7 @@ PAGE_SUBTITLE = {
     "Cube Test Comparison": "Compare maturity-based live strength against lab cube compression results.",
     "Strength Prediction": "Estimate strength from maturity and explore the calibrated strength curve.",
     "Upload Dataset": "Load a CSV of sensor readings to drive the dashboard.",
-    "Temperature Alerts": "Configure temperature limits and SMS notifications.",
+    "Temperature Alerts": "Configure temperature limits and email notifications.",
     "Cube Test Data": "Record and review compression test results.",
     "Settings": "Maturity method, refresh behaviour and operator details.",
 }
@@ -735,7 +702,6 @@ def auth_screen():
             else:
                 name = st.text_input("Full name")
                 email = st.text_input("Email address")
-                phone = st.text_input("Mobile number (for SMS alerts)")
                 pw = st.text_input("Password", type="password")
                 if st.button("Create Account", type="primary", use_container_width=True, key="create_btn"):
                     if not supabase:
@@ -743,7 +709,7 @@ def auth_screen():
                     else:
                         try:
                             supabase.auth.sign_up({"email": email.strip().lower(), "password": pw})
-                            st.session_state.operator, st.session_state.phone = name or "Site Engineer", phone
+                            st.session_state.operator = name or "Site Engineer"
                             st.success("Account created. Check your email to confirm, then sign in.")
                             st.session_state.auth_mode = "Sign In"
                         except Exception as e:
