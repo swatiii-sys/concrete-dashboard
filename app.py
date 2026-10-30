@@ -299,6 +299,8 @@ DEFAULT_STATE = {
 }
 for _k, _v in DEFAULT_STATE.items():
     st.session_state.setdefault(_k, _v)
+# Keep the visible source selector separate from the application data value.
+st.session_state.setdefault("source_choice_widget", st.session_state.get("source_choice", "ThingSpeak live"))
 
 
 def load_cube_calibration_from_supabase():
@@ -773,6 +775,9 @@ def card_upload(ctx):
                 st.session_state.upload_name = f.name
                 st.session_state.upload_signature = (f.name, f.size, f.getvalue().__hash__())
                 st.session_state.source_choice = "Uploaded CSV"
+                # Synchronize the selectbox key at the start of the next run,
+                # before Streamlit instantiates that widget.
+                st.session_state["_sync_source_choice_widget"] = True
                 st.rerun()
             except Exception as e:
                 st.error(f"Could not read file: {e}")
@@ -1039,6 +1044,7 @@ def page_upload():
             st.session_state.raw_df, st.session_state.upload_name = None, None
             st.session_state.upload_signature = None
             st.session_state.source_choice = "ThingSpeak live"
+            st.session_state["_sync_source_choice_widget"] = True
             st.rerun()
 
 
@@ -1298,8 +1304,18 @@ with top_right:
     st.markdown(f"<div style='text-align:right;color:#475569;font-size:.85rem;padding-top:.5rem'>{st.session_state.operator}</div>", unsafe_allow_html=True)
 
 source_options = ["ThingSpeak live", "Uploaded CSV", "Supabase", "Demo (sample data)"]
-st.selectbox("Dashboard data source", source_options, key="source_choice",
-             help="Choose Uploaded CSV after uploading to display the CSV in every chart. ThingSpeak live never silently switches to demo readings.")
+# Apply programmatic changes before the widget is created (Streamlit requirement).
+if st.session_state.pop("_sync_source_choice_widget", False):
+    st.session_state["source_choice_widget"] = st.session_state.get("source_choice", "ThingSpeak live")
+
+def on_source_choice_change():
+    st.session_state["source_choice"] = st.session_state["source_choice_widget"]
+
+st.selectbox(
+    "Dashboard data source", source_options,
+    key="source_choice_widget", on_change=on_source_choice_change,
+    help="Choose Uploaded CSV after uploading to display the CSV in every chart. ThingSpeak live never silently switches to demo readings."
+)
 _df_hdr = get_data()
 h1, h2, h3 = st.columns([5, 1.3, 1.2])
 with h1:
