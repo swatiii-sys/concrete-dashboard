@@ -1,10 +1,4 @@
-[theme]
-base = "light"
-primaryColor = "#2563eb"
-backgroundColor = "#f4f7fc"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#0f172a"
-font = "sans serif"
+
 THINGSPEAK_CHANNEL_ID = "3559934"
 THINGSPEAK_READ_KEY = "K7P9H2FQJX1W1P9U" # blank for public channel
 THINGSPEAK_ALERT_KEY = "YOUR_ALERTS_API_KEY"
