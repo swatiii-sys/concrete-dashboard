@@ -1,1 +1,8 @@
-streamlit>=1.37\nnumpy\npandas\nplotly\nrequests\nsupabase\nscikit-learn==1.6.1\njoblib\n
+streamlit>=1.37
+numpy
+pandas
+plotly
+requests
+supabase
+scikit-learn==1.6.1
+joblib
