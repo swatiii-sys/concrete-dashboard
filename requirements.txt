@@ -63,3 +63,9 @@ uvicorn==0.54.0
 watchdog==6.0.0
 websockets==15.0.1
 yarl==1.25.1
+streamlit>=1.37
+pandas
+numpy
+plotly
+requests
+supabase
