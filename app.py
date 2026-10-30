@@ -274,6 +274,7 @@ DEFAULT_STATE = {
     "cube_data": {},
     "cube_maturity": {},
     "cube_saved": False,
+    "cube_maturity_message": "",
     "calc_result": None,
     "datum_temp": -10.0,        # User-confirmed Nurse-Saul datum temperature (°C)
     "ref_temp": 27.0,          # retained as a reference setting
@@ -347,13 +348,17 @@ st.markdown(
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
-.stApp { background: #f4f7fc; color: #0f172a; }
-.block-container { padding: 1.2rem 2rem 2rem 2rem; max-width: 1600px; }
+.stApp { background: #f7fafc; color: #172b3a; }
+.block-container { padding: 1.5rem 2.2rem 2.5rem 2.2rem; max-width: 1700px; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-radius:16px !important; }
+.stCaption, [data-testid="stCaptionContainer"] { color:#536b78 !important; }
+[data-testid="stMetricValue"] { color:#123b4a !important; font-weight:750 !important; }
+.stDataFrame { border:1px solid #dce7eb; border-radius:12px; overflow:hidden; }
 
 /* ---------- Sidebar ---------- */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0b1b3a 0%, #0a1630 100%);
-    border-right: 1px solid #14264d; min-width: 270px !important;
+    background: linear-gradient(180deg, #123b4a 0%, #0e2d3a 100%);
+    border-right: 1px solid #d5e4e8; min-width: 270px !important;
 }
 section[data-testid="stSidebar"] * { color: #dbe5ff; }
 section[data-testid="stSidebar"] .stButton > button {
@@ -363,7 +368,7 @@ section[data-testid="stSidebar"] .stButton > button {
 section[data-testid="stSidebar"] .stButton > button:hover { background: rgba(255,255,255,.07); color: #fff; }
 section[data-testid="stSidebar"] .stButton > button[kind="primary"],
 section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
-    background: #1d4ed8; color: #fff; box-shadow: 0 4px 14px rgba(29,78,216,.45);
+    background: #087e8b; color: #fff; box-shadow: 0 4px 14px rgba(8,126,139,.25);
 }
 .brand { display:flex; gap:12px; align-items:center; padding:.4rem .3rem 0 .3rem; }
 .brand-logo { width:46px; height:46px; border-radius:12px; background:linear-gradient(135deg,#3b82f6,#1e40af);
@@ -381,8 +386,8 @@ div[role="radiogroup"][aria-label="top-nav"] label {
     padding: .55rem .2rem; margin: 0; border-bottom: 3px solid transparent; cursor: pointer;
 }
 div[role="radiogroup"][aria-label="top-nav"] label p { font-weight: 500; color:#475569; font-size:.9rem; }
-div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) { border-bottom-color:#2563eb; }
-div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) p { color:#1d4ed8; font-weight:700; }
+div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) { border-bottom-color:#087e8b; }
+div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) p { color:#087e8b; font-weight:700; }
 
 /* ---------- Cards ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"] .card-title) ,
@@ -393,7 +398,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 }
 .card-title { font-weight:700; font-size:1rem; color:#0f172a; margin:0 0 .6rem 0; }
 .card-note { font-size:.78rem; color:#64748b; margin-bottom:.5rem; }
-.page-title { font-size:1.75rem; font-weight:800; color:#0b1b3a; margin:0; letter-spacing:-.02em; }
+.page-title { font-size:1.85rem; font-weight:800; color:#123b4a; margin:0; letter-spacing:-.02em; }
 .page-sub { color:#64748b; font-size:.92rem; margin:.15rem 0 0 0; }
 .pill-online { display:inline-flex; gap:6px; align-items:center; background:#e8f8ef; color:#15803d;
     border:1px solid #bbebd0; border-radius:999px; padding:.4rem .9rem; font-weight:600; font-size:.82rem; }
@@ -422,9 +427,9 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 /* ---------- Inputs / buttons ---------- */
 div[data-baseweb="input"], div[data-baseweb="select"] > div { background:#fff !important; border-radius:8px !important; }
 .stButton > button[kind="primary"], button[data-testid="stBaseButton-primary"] {
-    background:#2563eb; color:#fff; border:none; border-radius:8px; font-weight:600;
+    background:#087e8b; color:#fff; border:none; border-radius:8px; font-weight:600;
 }
-.stButton > button[kind="primary"]:hover { background:#1d4ed8; }
+.stButton > button[kind="primary"]:hover { background:#066874; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -658,7 +663,7 @@ def fig_compare(cmp, height=330):
 # ============================================================== REUSABLE CARDS
 def card_upload(ctx):
     with st.container(border=True):
-        st.markdown('<div class="card-title">1. Upload Dataset</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Upload Dataset</div>', unsafe_allow_html=True)
         f = st.file_uploader("Choose CSV file", type=["csv"], key=f"{ctx}_upl", label_visibility="collapsed")
         if f is not None and st.session_state.get("upload_signature") != (f.name, f.size, f.getvalue().__hash__()):
             try:
@@ -677,7 +682,7 @@ def card_upload(ctx):
 
 def card_grade(ctx):
     with st.container(border=True):
-        st.markdown('<div class="card-title">2. Select Concrete Grade</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Concrete Grade</div>', unsafe_allow_html=True)
         g = st.selectbox("Grade", list(GRADES), index=list(GRADES).index(st.session_state.grade), key=f"{ctx}_grade", label_visibility="collapsed")
         st.session_state.grade = g
         st.caption(f"Target 28-day strength: **{GRADES[g]:.0f} MPa**")
@@ -685,35 +690,51 @@ def card_grade(ctx):
 
 def card_alert(ctx):
     with st.container(border=True):
-        st.markdown('<div class="card-title">3. Set Temperature Alert</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Temperature Alert</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         st.session_state.alert_temp = c1.number_input("Alert Temperature (°C)", value=float(st.session_state.alert_temp), step=1.0, key=f"{ctx}_at")
         st.session_state.alert_type = c2.selectbox("Alert Type", ["Above", "Below"], index=["Above", "Below"].index(st.session_state.alert_type), key=f"{ctx}_aty")
 
 
 def card_cube_input(ctx):
+    """Enter one measured value per cube age; maturity is taken from sensor history."""
     with st.container(border=True):
         st.markdown('<div class="card-title">Add Cube Test Data (Compression)</div>', unsafe_allow_html=True)
-        st.markdown('<div class="card-note">Enter measured compressive strength and cumulative Nurse–Saul maturity recorded at the exact time each cube was tested. Both values are required for calibration.</div>', unsafe_allow_html=True)
-        vals, maturities = {}, {}
+        st.markdown(
+            '<div class="card-note">Enter the measured compressive strength for each tested age. '
+            'Maturity is calculated automatically from the recorded sensor temperature history.</div>',
+            unsafe_allow_html=True,
+        )
+        vals = {}
         for age in CUBE_AGES:
-            c1, c2 = st.columns([1, 1])
-            vals[age] = c1.number_input(
-                f"{age}-day strength (MPa)", min_value=0.0,
+            vals[age] = st.number_input(
+                f"{age}-day cube strength (MPa)", min_value=0.0,
                 value=float(st.session_state.cube_data.get(age, 0.0)),
-                step=0.1, key=f"{ctx}_cube_{age}"
-            )
-            maturities[age] = c2.number_input(
-                f"{age}-day maturity (°C·hr)", min_value=0.0,
-                value=float(st.session_state.cube_maturity.get(age, 0.0)),
-                step=10.0, key=f"{ctx}_maturity_{age}"
+                step=0.1, key=f"{ctx}_cube_{age}",
             )
         if st.button("Save Cube Test Data", type="primary", key=f"{ctx}_save", use_container_width=True):
+            sensor_df = get_data()
             st.session_state.cube_data = {a: v for a, v in vals.items() if v > 0}
-            st.session_state.cube_maturity = {a: maturities[a] for a, v in vals.items() if v > 0 and maturities[a] > 0}
+            calculated = {}
+            for age, strength in st.session_state.cube_data.items():
+                maturity_value = maturity_at_age(
+                    sensor_df, age * 24.0, st.session_state.datum_temp, st.session_state.ref_temp
+                ) if not sensor_df.empty else np.nan
+                if np.isfinite(maturity_value) and maturity_value > 0:
+                    calculated[age] = float(maturity_value)
+            st.session_state.cube_maturity = calculated
             st.session_state.cube_saved = True
             ok, message = save_cube_calibration_to_supabase()
             st.session_state.cube_storage_message = message
+            missing = sorted(set(st.session_state.cube_data) - set(calculated))
+            if missing:
+                st.session_state.cube_maturity_message = (
+                    "Sensor history does not yet cover these cube ages, so their maturity "
+                    f"could not be matched: {', '.join(map(str, missing))} days. "
+                    "Keep the sensor history from the start of curing or enter data after sufficient readings are available."
+                )
+            else:
+                st.session_state.cube_maturity_message = "Maturity values matched automatically from sensor history."
             if not ok and supabase is not None:
                 st.error(message)
             st.rerun()
@@ -728,7 +749,12 @@ def card_cube_table():
             "Maturity (°C·hr)": st.session_state.cube_maturity.get(a),
             "Status": "Complete" if st.session_state.cube_maturity.get(a, 0) > 0 else "Maturity required",
         } for a, v in sorted(st.session_state.cube_data.items())]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No cube-test values entered yet. Add measured strengths above.")
+        if st.session_state.get("cube_maturity_message"):
+            st.caption(st.session_state.cube_maturity_message)
         if st.session_state.get("cube_storage_message"):
             st.caption(st.session_state.cube_storage_message)
         if not st.session_state.cube_saved:
@@ -814,11 +840,10 @@ def card_strength_table(cmp):
 
 # ============================================================== PAGES
 def page_dashboard():
-    c1, c2, c3, c4 = st.columns([1.15, 1, 1.15, 2.1])
+    c1, c2, c3 = st.columns([1.25, 1, 1.15])
     with c1: card_upload("d")
     with c2: card_grade("d")
     with c3: card_alert("d")
-    with c4: card_cube_input("d")
     df = get_data()
     if not data_ready(df):
         return
@@ -827,6 +852,8 @@ def page_dashboard():
     st.write("")
     kpi_row(df)
     st.write("")
+    with st.expander("Enter / update cube compression results", expanded=False):
+        card_cube_input("d")
     g1, g2, g3 = st.columns([1.25, 1.15, 1])
     with g1:
         with st.container(border=True):
@@ -1070,19 +1097,21 @@ def page_alerts():
 
 
 def page_cube():
-    c1, c2 = st.columns([1.4, 1])
+    st.markdown("Enter one measured compressive-strength value for each cube-test age. The dashboard matches maturity from available sensor history.")
+    c1, c2 = st.columns([1.15, 1])
     with c1:
         card_cube_input("t")
-        df = get_data()
-    if not data_ready(df):
-        return
-        with st.container(border=True):
-            st.markdown('<div class="card-title">Cube Strength vs Age</div>', unsafe_allow_html=True)
-            cd = st.session_state.cube_data
-            fig = go.Figure(go.Bar(x=[f"{a} d" for a in cd], y=list(cd.values()), marker_color="#f97316", text=list(cd.values()), textposition="outside"))
-            st.plotly_chart(style_fig(fig, 320, "Age", "MPa"), use_container_width=True)
     with c2:
         card_cube_table()
+    cd = st.session_state.cube_data
+    if cd:
+        with st.container(border=True):
+            st.markdown('<div class="card-title">Cube Strength vs Age</div>', unsafe_allow_html=True)
+            fig = go.Figure(go.Bar(x=[f"{a} days" for a in cd], y=list(cd.values()), text=[f"{v:.1f}" for v in cd.values()], textposition="outside"))
+            fig.update_traces(marker_color="#0b8793")
+            st.plotly_chart(style_fig(fig, 330, "Cube Age", "Compressive Strength (MPa)"), use_container_width=True)
+    else:
+        st.info("The strength chart will appear after you save cube-test values.")
 
 
 def page_settings():
