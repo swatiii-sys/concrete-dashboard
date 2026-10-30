@@ -49,6 +49,4 @@ RENDER DEPLOYMENT
 4. Confirm the Render build installs requirements.txt successfully.
 5. Create the Supabase table before saving cube calibration records.
 
-ANN MODEL NOTE
-The model was preserved. Its pickle metadata identifies one numeric input but does not identify the meaning or unit
-of that input. The application intentionally does not assume that the input is maturity or age.
+
