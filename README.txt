@@ -1,1 +1,0 @@
-Run: pip install -r requirements.txt\nThen: streamlit run app.py\nCreate .streamlit/secrets.toml using the example and a newly regenerated Read API Key.\nSelect ThingSpeak live for sensor feed, or Uploaded CSV to drive all charts from uploaded data.\nNo login. No fabricated fallback when live data is unavailable.\n
