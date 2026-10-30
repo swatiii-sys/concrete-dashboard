@@ -6,6 +6,8 @@ Run:  streamlit run app.py
 """
 import os
 import time
+import hashlib
+import json
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -66,6 +68,122 @@ def send_email_alert(subject, message):
         return "Sent" if response.ok else f"HTTP {response.status_code}: {response.text[:160]}"
     except requests.RequestException as exc:
         return f"Request failed: {exc}"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_thingspeak_alert_history(api_key, count=100):
+    """Fetch ThingSpeak Alerts API history (ThingSpeak retains 7 days)."""
+    if not api_key:
+        return [], "Missing THINGSPEAK_ALERT_KEY"
+
+    try:
+        response = requests.get(
+            "https://api.thingspeak.com/alerts/history",
+            headers={"ThingSpeak-Alerts-API-Key": api_key},
+            params={"count": min(max(int(count), 1), 100)},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        if isinstance(payload, list):
+            return payload, None
+        if isinstance(payload, dict):
+            # Be tolerant of wrapped responses if the API format changes.
+            for key in ("alerts", "history", "data", "results"):
+                if isinstance(payload.get(key), list):
+                    return payload[key], None
+            return [], "Unexpected ThingSpeak alert-history response format"
+        return [], "Unexpected ThingSpeak alert-history response format"
+
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        detail = ""
+        if exc.response is not None:
+            detail = exc.response.text[:250]
+        return [], f"ThingSpeak alert-history HTTP {status}: {detail}"
+    except (requests.RequestException, ValueError) as exc:
+        return [], f"Could not retrieve ThingSpeak alert history: {exc}"
+
+
+def normalize_alert_history(records):
+    """Normalize ThingSpeak camelCase response fields into dashboard columns."""
+    rows = []
+    for item in records or []:
+        if not isinstance(item, dict):
+            continue
+        requested_at = item.get("requestedAt", item.get("requested_at", ""))
+        sent_at = item.get("sentAt", item.get("sent_at", ""))
+        subject = item.get("subject", "")
+        status = item.get("status", "")
+        identity_source = {
+            "requested_at": requested_at,
+            "sent_at": sent_at,
+            "subject": subject,
+            "status": status,
+        }
+        alert_id = hashlib.sha256(
+            json.dumps(identity_source, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        rows.append({
+            "alert_id": alert_id,
+            "requested_at": str(requested_at) if requested_at is not None else None,
+            "sent_at": str(sent_at) if sent_at is not None else None,
+            "subject": str(subject) if subject is not None else "",
+            "status": str(status) if status is not None else "",
+            "raw_payload": item,
+        })
+    return rows
+
+
+def archive_alert_history_in_supabase(rows):
+    """Idempotently archive API records; requires the SQL table supplied with this app."""
+    if supabase is None or not rows:
+        return False, "Supabase archive is not configured or there are no alerts to save."
+    try:
+        supabase.table("thingspeak_alert_history").upsert(
+            rows, on_conflict="alert_id"
+        ).execute()
+        return True, f"Archived {len(rows)} ThingSpeak alert record(s) in Supabase."
+    except Exception as exc:
+        return False, f"Supabase alert archive unavailable: {exc}"
+
+
+def get_dashboard_alert_history():
+    """Return archived records where available, otherwise the live 7-day API history."""
+    api_records, api_error = fetch_thingspeak_alert_history(get_alert_key(), 100)
+    normalized = normalize_alert_history(api_records)
+
+    archive_message = ""
+    if normalized and supabase is not None:
+        _, archive_message = archive_alert_history_in_supabase(normalized)
+
+    if supabase is not None:
+        try:
+            result = (
+                supabase.table("thingspeak_alert_history")
+                .select("alert_id,requested_at,sent_at,subject,status")
+                .order("requested_at", desc=True)
+                .limit(500)
+                .execute()
+            )
+            archived = result.data or []
+            if archived:
+                return pd.DataFrame(archived), api_error, archive_message
+        except Exception as exc:
+            archive_message = (
+                "Could not read Supabase alert archive. Run the supplied "
+                f"supabase_alert_history.sql file. Details: {exc}"
+            )
+
+    if normalized:
+        return pd.DataFrame([
+            {k: row.get(k) for k in
+             ("requested_at", "sent_at", "subject", "status")}
+            for row in normalized
+        ]), api_error, archive_message
+
+    return pd.DataFrame(columns=["requested_at", "sent_at", "subject", "status"]), api_error, archive_message
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -860,38 +978,137 @@ def page_upload():
 
 
 def page_alerts():
+    st.markdown(
+        '<div class="card-title">ThingSpeak Email Alert History</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Recent email notification records retrieved from ThingSpeak. "
+        "The ThingSpeak API retains alert history for seven days; when Supabase "
+        "is configured, records retrieved by this dashboard are archived there."
+    )
+
+    history_df, history_error, archive_message = get_dashboard_alert_history()
+
+    if history_error:
+        st.warning(history_error)
+    if archive_message:
+        if archive_message.startswith("Could not"):
+            st.warning(archive_message)
+        else:
+            st.caption(archive_message)
+
+    if not history_df.empty:
+        h1, h2, h3 = st.columns(3)
+        h1.metric("Email alert records", len(history_df))
+        sent_count = (
+            history_df["status"].astype(str).str.lower().eq("sent").sum()
+            if "status" in history_df else 0
+        )
+        h2.metric("Reported as sent", int(sent_count))
+        h3.metric("Other statuses", int(len(history_df) - sent_count))
+
+        display_history = history_df.rename(columns={
+            "requested_at": "Requested At",
+            "sent_at": "Sent At",
+            "subject": "Email Subject",
+            "status": "Delivery Status",
+        })
+        st.dataframe(
+            display_history,
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.download_button(
+            "Download alert history CSV",
+            display_history.to_csv(index=False).encode("utf-8"),
+            file_name="thingspeak_alert_history.csv",
+            mime="text/csv",
+        )
+    elif not history_error:
+        st.info("No ThingSpeak email alert records were returned.")
+
+    st.divider()
     df = get_data()
-    if not data_ready(df):
-        return
-    source_banner(df)
+
     c1, c2 = st.columns([1, 1.6])
     with c1:
         card_alert("a")
         with st.container(border=True):
-            st.markdown('<div class="card-title">Email Notifications (ThingSpeak)</div>', unsafe_allow_html=True)
-            st.session_state.email_enabled = st.toggle("Enable email alerts", value=st.session_state.email_enabled, key="a_email")
-            st.session_state.email_gap_min = st.number_input("Minimum minutes between emails", min_value=1, max_value=1440, value=int(st.session_state.email_gap_min), step=1, key="a_email_gap")
+            st.markdown(
+                '<div class="card-title">Email Notifications (ThingSpeak)</div>',
+                unsafe_allow_html=True,
+            )
+            st.session_state.email_enabled = st.toggle(
+                "Enable email alerts",
+                value=st.session_state.email_enabled,
+                key="a_email",
+            )
+            st.session_state.email_gap_min = st.number_input(
+                "Minimum minutes between emails",
+                min_value=1,
+                max_value=1440,
+                value=int(st.session_state.email_gap_min),
+                step=1,
+                key="a_email_gap",
+            )
             if get_alert_key():
-                st.caption("Emails go to the ThingSpeak account that owns your Alerts API key.")
+                st.success(
+                    "ThingSpeak Alerts API Key is configured. "
+                    "This key is used for sending emails and reading alert history."
+                )
             else:
-                st.warning("Set THINGSPEAK_ALERT_KEY (environment variable or Streamlit secret) to send emails.")
-            if st.button("Send Test Email", key="a_test_email", use_container_width=True):
-                msg = "ConcreMat test alert: email is working."
+                st.warning(
+                    "Set THINGSPEAK_ALERT_KEY in Render Environment or "
+                    "Streamlit secrets to send emails and retrieve history."
+                )
+            if st.button(
+                "Send Test Email", key="a_test_email", use_container_width=True
+            ):
+                msg = "Concrete curing monitoring test alert: email is working."
                 status = send_email_alert("Concrete Monitor Test", msg)
-                st.session_state.alert_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": "Email (ThingSpeak)", "Status": status, "Message": msg})
-                (st.success if status == "Sent" else st.error)(f"Email status: {status}")
+                st.session_state.alert_log.insert(0, {
+                    "Time": datetime.now().strftime("%d %b %H:%M"),
+                    "To": "Email (ThingSpeak)",
+                    "Status": status,
+                    "Message": msg,
+                })
+                if status == "Sent":
+                    st.success(f"Email request accepted by ThingSpeak: {status}")
+                    fetch_thingspeak_alert_history.clear()
+                else:
+                    st.error(f"Email status: {status}")
+
     with c2:
-        kpi_row(df)
-        st.write("")
-        with st.container(border=True):
-            st.markdown('<div class="card-title">Core Temperature vs Alert Limit</div>', unsafe_allow_html=True)
-            st.plotly_chart(fig_live(df, 320), use_container_width=True)
-        with st.container(border=True):
-            st.markdown('<div class="card-title">Alert History</div>', unsafe_allow_html=True)
-            if st.session_state.alert_log:
-                st.dataframe(pd.DataFrame(st.session_state.alert_log), hide_index=True, use_container_width=True)
-            else:
-                st.caption("No alerts sent yet.")
+        if data_ready(df):
+            source_banner(df)
+            kpi_row(df)
+            st.write("")
+            with st.container(border=True):
+                st.markdown(
+                    '<div class="card-title">Core Temperature vs Alert Limit</div>',
+                    unsafe_allow_html=True,
+                )
+                st.plotly_chart(fig_live(df, 320), use_container_width=True)
+        else:
+            st.info(
+                "Sensor charts are unavailable until readings are available. "
+                "ThingSpeak email alert history above can still be viewed."
+            )
+
+    with st.container(border=True):
+        st.markdown('<div class="card-title">Alerts Triggered by This Dashboard</div>',
+                    unsafe_allow_html=True)
+        if st.session_state.alert_log:
+            st.dataframe(
+                pd.DataFrame(st.session_state.alert_log),
+                hide_index=True,
+                use_container_width=True,
+            )
+        else:
+            st.caption(
+                "No alerts have been triggered by this dashboard during the current session."
+            )
 
 
 def page_cube():
