@@ -275,7 +275,6 @@ DEFAULT_STATE = {
     "cube_maturity": {},
     "cube_saved": False,
     "calc_result": None,
-    "ann_input_feature": "Not configured",
     "datum_temp": -10.0,        # User-confirmed Nurse-Saul datum temperature (°C)
     "ref_temp": 27.0,          # retained as a reference setting
     "auto_refresh": True,
@@ -463,31 +462,6 @@ def maturity_at_age(df: pd.DataFrame, age_h: float, datum: float, ref_t: float) 
     return float(np.interp(age_h, df["elapsed"], df["maturity"]))
 
 
-def load_ann_model():
-    try:
-        import joblib
-        model_path = os.path.join(os.path.dirname(__file__), "ann_concrete_strength_model.pkl")
-        return joblib.load(model_path) if os.path.exists(model_path) else None
-    except Exception:
-        return None
-
-
-ANN_MODEL = load_ann_model()
-
-
-def ann_predict(input_value):
-    """Return ANN output in MPa only after its single input feature is configured."""
-    if ANN_MODEL is None or st.session_state.ann_input_feature == "Not configured":
-        return np.nan
-    try:
-        value = float(input_value)
-        if not np.isfinite(value) or value < 0:
-            return np.nan
-        prediction = float(np.asarray(ANN_MODEL.predict([[value]])).reshape(-1)[0])
-        return prediction if np.isfinite(prediction) and prediction >= 0 else np.nan
-    except Exception:
-        return np.nan
-
 
 def simulate_df() -> pd.DataFrame:
     """Demo dataset (48 h, hourly) used until a real CSV is uploaded."""
@@ -576,11 +550,6 @@ def get_data() -> pd.DataFrame:
     df["maturity"] = ((average_temp - datum).clip(lower=0).fillna(0) * dt).cumsum()
     calibration_m, calibration_s = fit_curve(ss.cube_data, ss.cube_maturity)
     df["strength"] = predict_strength(df["maturity"].values, calibration_m, calibration_s)
-    df["ann_strength"] = np.nan
-    if ss.ann_input_feature == "Elapsed age (days since first sensor reading)":
-        df["ann_strength"] = [ann_predict(v / 24.0) for v in df["elapsed"]]
-    elif ss.ann_input_feature == "Maturity (°C·hr)":
-        df["ann_strength"] = [ann_predict(v) for v in df["maturity"]]
     df.attrs["curve"] = (calibration_m, calibration_s)
     return df
 
@@ -786,7 +755,7 @@ def kpi_row(df):
         age_min = (pd.Timestamp.now(tz=DISPLAY_TZ).tz_localize(None) - latest["ts"]).total_seconds() / 60
         if 0 <= age_min <= st.session_state.ts_stale_minutes:
             handle_alert(float(latest["core"]))
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3 = st.columns(3)
     with k1:
         badge = '<span class="badge badge-bad">Alert</span>' if triggered else '<span class="badge badge-ok">Normal</span>'
         kpi("Current Core Temperature", f"{latest['core']:.1f}", " °C", badge, "blue")
@@ -795,10 +764,6 @@ def kpi_row(df):
     with k3:
         strength = f"{latest['strength']:.1f}" if pd.notna(latest["strength"]) else "N/A"
         kpi("Cube-Calibrated Strength", strength, " MPa", "Only within measured maturity range", "purple")
-    with k4:
-        ann_value = latest.get("ann_strength", np.nan)
-        ann_text = f"{ann_value:.1f}" if pd.notna(ann_value) else "N/A"
-        kpi("ANN Strength", ann_text, " MPa", "Requires verified ANN input feature", "amber")
 
 
 def card_monitoring_table(df):
@@ -814,7 +779,6 @@ def card_monitoring_table(df):
             "Ambient Temp (°C)": t["ambient"].round(1),
             "Maturity (°C·hr)": t["maturity"].round(1),
             "Cube-Calibrated Strength (MPa)": t["strength"].round(1),
-            "ANN Strength (MPa)": t["ann_strength"].round(1),
             "Status": ["Alert" if x else "Normal" for x in triggered],
         })
         st.dataframe(out, hide_index=True, use_container_width=True)
@@ -949,12 +913,6 @@ def page_prediction():
     with p2:
         card_calculator("p")
         card_strength_table(comparison_df(df))
-    with st.container(border=True):
-        st.markdown('<div class="card-title">ANN Model Prediction</div>', unsafe_allow_html=True)
-        st.warning("The bundled ANN file accepts one numeric input but has no embedded feature name or training metadata. Select its documented input feature in Settings before using its output. Do not choose a feature by guesswork.")
-        st.write("Current ANN input setting:", st.session_state.ann_input_feature)
-        if st.session_state.ann_input_feature == "Not configured":
-            st.caption("ANN prediction is withheld until the model's input variable is verified from its training code.")
 
 
 def page_upload():
@@ -1134,12 +1092,6 @@ def page_settings():
             st.markdown('<div class="card-title">Maturity Settings</div>', unsafe_allow_html=True)
             st.session_state.datum_temp = st.number_input("Datum temperature (°C)", value=float(st.session_state.datum_temp), step=1.0, key="s_datum", help="Your confirmed Nurse–Saul datum temperature is −10°C.")
             st.session_state.ref_temp = st.number_input("Assumed avg curing temp beyond dataset (°C)", value=float(st.session_state.ref_temp), step=0.5, key="s_ref")
-            st.session_state.ann_input_feature = st.selectbox(
-                "ANN model input feature (verify from training code)",
-                ["Not configured", "Elapsed age (days since first sensor reading)", "Maturity (°C·hr)"],
-                index=["Not configured", "Elapsed age (days since first sensor reading)", "Maturity (°C·hr)"].index(st.session_state.ann_input_feature),
-                help="Only select the feature the ANN was actually trained to receive. The bundled model has one input and no embedded feature name."
-            )
             st.session_state.auto_refresh = st.toggle("Auto-refresh Live Monitoring", value=st.session_state.auto_refresh, key="s_auto")
             st.session_state.refresh_s = st.slider("Refresh interval (seconds)", 5, 60, int(st.session_state.refresh_s), key="s_ref_s")
         with st.container(border=True):
