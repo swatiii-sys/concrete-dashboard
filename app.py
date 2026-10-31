@@ -8,6 +8,8 @@ import os
 import time
 import hashlib
 import json
+import sqlite3
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -31,6 +33,11 @@ st.set_page_config(
 # ============================================================== SUPABASE (optional, keys from environment ONLY)
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().strip('"').strip("'")
 SUPABASE_KEY = (os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_KEY", "")).strip().strip('"').strip("'")
+try:
+    SUPABASE_URL = SUPABASE_URL or str(st.secrets.get("SUPABASE_URL", "")).strip()
+    SUPABASE_KEY = SUPABASE_KEY or str(st.secrets.get("SUPABASE_SECRET_KEY", st.secrets.get("SUPABASE_KEY", ""))).strip()
+except Exception:
+    pass
 supabase = None
 if create_client and SUPABASE_URL.startswith("https://") and SUPABASE_KEY:
     try:
@@ -303,44 +310,64 @@ for _k, _v in DEFAULT_STATE.items():
 st.session_state.setdefault("source_choice_widget", st.session_state.get("source_choice", "ThingSpeak live"))
 
 
-def load_cube_calibration_from_supabase():
-    if supabase is None or st.session_state.get("_cube_calibration_loaded"):
+# Local SQLite persists across browser refresh and application restarts on a persistent disk.
+# For cloud deployments with ephemeral disks, configure Supabase for durable storage.
+DB_PATH = Path(os.environ.get("CONCRETE_DB_PATH", str(Path(__file__).with_name("concrete_saved.sqlite3"))))
+
+def local_cube_connection():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH), timeout=15)
+    conn.execute("""CREATE TABLE IF NOT EXISTS cube_calibration (
+        age_days INTEGER PRIMARY KEY,
+        compressive_strength_mpa REAL NOT NULL,
+        maturity_celsius_hours REAL)""")
+    conn.commit()
+    return conn
+
+def load_cube_calibration():
+    if st.session_state.get("_cube_calibration_loaded"):
         return
+    records = []
     try:
-        response = supabase.table("cube_calibration").select("*").execute()
-        records = response.data or []
-        if records:
-            st.session_state.cube_data = {int(r["age_days"]): float(r["compressive_strength_mpa"]) for r in records}
-            st.session_state.cube_maturity = {int(r["age_days"]): float(r["maturity_celsius_hours"]) for r in records}
-            st.session_state.cube_saved = True
+        if supabase is not None:
+            response = supabase.table("cube_calibration").select("*").execute()
+            records = response.data or []
+            st.session_state.cube_storage_backend = "Supabase"
+        else:
+            with local_cube_connection() as conn:
+                records = [dict(zip(("age_days", "compressive_strength_mpa", "maturity_celsius_hours"), r)) for r in conn.execute("SELECT age_days, compressive_strength_mpa, maturity_celsius_hours FROM cube_calibration")]
+            st.session_state.cube_storage_backend = "Local SQLite (requires persistent disk for cloud hosting)"
+        st.session_state.cube_data = {int(r["age_days"]): float(r["compressive_strength_mpa"]) for r in records}
+        st.session_state.cube_maturity = {int(r["age_days"]): float(r["maturity_celsius_hours"]) for r in records if r.get("maturity_celsius_hours") is not None and float(r["maturity_celsius_hours"]) > 0}
+        st.session_state.cube_saved = bool(records)
+        st.session_state._cube_calibration_loaded = True
     except Exception as exc:
         st.session_state.cube_storage_error = str(exc)
-    st.session_state["_cube_calibration_loaded"] = True
+        # Do not silently substitute temporary storage for a failed configured cloud database.
 
-
-def save_cube_calibration_to_supabase():
-    if supabase is None:
-        return False, "Supabase is not configured; values are saved only for this session."
-    rows = [
-        {
-            "age_days": int(age),
-            "compressive_strength_mpa": float(strength),
-            "maturity_celsius_hours": float(st.session_state.cube_maturity[age]),
-        }
-        for age, strength in st.session_state.cube_data.items()
-        if age in st.session_state.cube_maturity and st.session_state.cube_maturity[age] > 0
-    ]
+def save_cube_calibration():
+    rows = [{"age_days": int(age), "compressive_strength_mpa": float(strength),
+             "maturity_celsius_hours": float(st.session_state.cube_maturity[age]) if age in st.session_state.cube_maturity else None}
+            for age, strength in st.session_state.cube_data.items()]
     try:
-        # Replace the current calibration set so removed/blank ages are not left stale.
-        supabase.table("cube_calibration").delete().neq("age_days", -1).execute()
-        if rows:
-            supabase.table("cube_calibration").upsert(rows, on_conflict="age_days").execute()
-        return True, "Cube calibration saved to Supabase."
+        if supabase is not None:
+            # Upsert first: never delete previous records if the write fails.
+            if rows:
+                supabase.table("cube_calibration").upsert(rows, on_conflict="age_days").execute()
+            existing = supabase.table("cube_calibration").select("age_days").execute().data or []
+            keep = {r["age_days"] for r in rows}
+            for r in existing:
+                if r["age_days"] not in keep:
+                    supabase.table("cube_calibration").delete().eq("age_days", r["age_days"]).execute()
+            return True, "Saved permanently to Supabase."
+        with local_cube_connection() as conn:
+            conn.execute("DELETE FROM cube_calibration")
+            conn.executemany("INSERT INTO cube_calibration (age_days, compressive_strength_mpa, maturity_celsius_hours) VALUES (:age_days, :compressive_strength_mpa, :maturity_celsius_hours)", rows)
+        return True, "Saved to local SQLite. For cloud hosting, connect Supabase or mount a persistent disk."
     except Exception as exc:
-        return False, f"Supabase save failed: {exc}"
+        return False, f"Save failed; records are not confirmed persistent: {exc}"
 
-
-load_cube_calibration_from_supabase()
+load_cube_calibration()
 
 # ============================================================== THEME / CSS
 st.markdown(
@@ -806,30 +833,40 @@ def card_alert(ctx):
 def card_cube_input(ctx):
     with st.container(border=True):
         st.markdown('<div class="card-title">Add Cube Test Data (Compression)</div>', unsafe_allow_html=True)
-        st.markdown('<div class="card-note">Enter measured compressive strength and cumulative Nurse–Saul maturity recorded at the exact time each cube was tested. Both values are required for calibration.</div>', unsafe_allow_html=True)
+        st.caption("Enter actual measured cube strength (MPa). Maturity is automatically taken from the selected temperature history when it covers the cube testing age. If not, you may enter the actual recorded maturity manually. No maturity is invented.")
+        df = get_data()
         vals, maturities = {}, {}
         for age in CUBE_AGES:
-            c1, c2 = st.columns([1, 1])
-            vals[age] = c1.number_input(
-                f"{age}-day strength (MPa)", min_value=0.0,
-                value=float(st.session_state.cube_data.get(age, 0.0)),
-                step=0.1, key=f"{ctx}_cube_{age}"
-            )
-            maturities[age] = c2.number_input(
-                f"{age}-day maturity (°C·hr)", min_value=0.0,
-                value=float(st.session_state.cube_maturity.get(age, 0.0)),
-                step=10.0, key=f"{ctx}_maturity_{age}"
-            )
+            observed = maturity_at_age(df, age * 24, st.session_state.datum_temp, st.session_state.ref_temp) if not df.empty else np.nan
+            stored = st.session_state.cube_maturity.get(age)
+            # Existing saved maturity takes precedence so later live-data changes do not silently rewrite a laboratory record.
+            auto = float(stored) if stored is not None else (float(observed) if np.isfinite(observed) else None)
+            vals[age] = st.number_input(f"{age}-day measured strength (MPa)", min_value=0.0,
+                value=float(st.session_state.cube_data.get(age, 0.0)), step=0.1, key=f"{ctx}_cube_{age}")
+            if auto is not None and auto > 0:
+                maturities[age] = auto
+                st.caption(f"{age}-day maturity: {auto:,.1f} °C·hr ({'saved calibration' if stored is not None else 'calculated from available temperature readings'})")
+            else:
+                with st.expander(f"{age}-day maturity unavailable from recorded data — enter actual value if known"):
+                    manual = st.number_input(f"Recorded {age}-day maturity (°C·hr)", min_value=0.0,
+                        value=0.0, step=10.0, key=f"{ctx}_maturity_{age}")
+                    if manual > 0:
+                        maturities[age] = manual
         if st.button("Save Cube Test Data", type="primary", key=f"{ctx}_save", use_container_width=True):
+            old_data, old_maturity = dict(st.session_state.cube_data), dict(st.session_state.cube_maturity)
             st.session_state.cube_data = {a: v for a, v in vals.items() if v > 0}
-            st.session_state.cube_maturity = {a: maturities[a] for a, v in vals.items() if v > 0 and maturities[a] > 0}
-            st.session_state.cube_saved = True
-            ok, message = save_cube_calibration_to_supabase()
-            st.session_state.cube_storage_message = message
-            if not ok and supabase is not None:
+            st.session_state.cube_maturity = {a: maturities[a] for a, v in vals.items() if v > 0 and a in maturities and maturities[a] > 0}
+            ok, message = save_cube_calibration()
+            if not ok:
+                st.session_state.cube_data, st.session_state.cube_maturity = old_data, old_maturity
                 st.error(message)
-            st.rerun()
-
+            else:
+                st.session_state.cube_saved = True
+                st.session_state.cube_storage_message = message
+                st.rerun()
+        if st.session_state.get("cube_storage_error"):
+            st.error("Could not load saved calibration: " + st.session_state.cube_storage_error)
+        st.caption("Storage: " + st.session_state.get("cube_storage_backend", "Not yet verified"))
 
 def card_cube_table():
     with st.container(border=True):
@@ -838,7 +875,7 @@ def card_cube_table():
             "Age (Days)": a,
             "Measured Strength (MPa)": v,
             "Maturity (°C·hr)": st.session_state.cube_maturity.get(a),
-            "Status": "Complete" if st.session_state.cube_maturity.get(a, 0) > 0 else "Maturity required",
+            "Status": "Complete" if st.session_state.cube_maturity.get(a, 0) > 0 else "Awaiting actual maturity reading",
         } for a, v in sorted(st.session_state.cube_data.items())]
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         if st.session_state.get("cube_storage_message"):
@@ -876,6 +913,12 @@ def kpi_row(df):
     with k3:
         strength = f"{latest['strength']:.1f}" if pd.notna(latest["strength"]) else "N/A"
         kpi("Cube-Calibrated Strength", strength, " MPa", "Only within measured maturity range", "purple")
+        if pd.isna(latest["strength"]):
+            cm, cs = fit_curve(st.session_state.cube_data, st.session_state.cube_maturity)
+            if len(cm) >= 2:
+                st.caption(f"Current maturity {latest['maturity']:,.1f} °C·hr is outside calibrated range {cm[0]:,.1f}–{cm[-1]:,.1f} °C·hr. Latest measured calibration: {cs[-1]:.2f} MPa (not a current prediction).")
+            else:
+                st.caption("Enter at least two measured strengths with distinct recorded maturity values to estimate strength.")
 
 
 def card_monitoring_table(df):
