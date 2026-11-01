@@ -1,8 +1,11 @@
-streamlit>=1.37
-numpy
+streamlit>=1.40
 pandas
+numpy
 plotly
 requests
-supabase
-scikit-learn==1.6.1
-joblib
+openpyxl      # read/write .xlsx and Excel report
+xlrd          # read legacy .xls uploads
+reportlab     # PDF report
+matplotlib    # charts inside the PDF report
+supabase      # optional
+ 
