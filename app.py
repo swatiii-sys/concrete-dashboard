@@ -1,6 +1,6 @@
 """
 IoT Based Concrete Curing & Strength Monitoring System.
-Professional multi-tab Streamlit dashboard (Home, Dashboard, Upload, Alerts, Cube Tests, Reports, Settings).
+Professional multi-tab Streamlit dashboard (Home, Live Monitoring, Upload, Alerts, Cube Tests, Strength Prediction, Reports, Settings).
 
 Run:  streamlit run app.py
 """
@@ -258,6 +258,7 @@ SIDEBAR = [
     "Temperature Alerts",
     "Cube Test Data",
     "Cube Test Comparison",
+    "Strength Prediction",
     "Download Report",
     "Settings",
 ]
@@ -1140,6 +1141,29 @@ def page_compare():
     card_cube_input("c")
 
 
+def page_prediction():
+    df = get_data()
+    if not data_ready(df):
+        return
+    kpi_row(df)
+    st.write("")
+    p1, p2 = st.columns([1.6, 1])
+    with p1:
+        with st.container(border=True):
+            st.markdown('<div class="card-title">Nurse–Saul Maturity–Strength Calibration</div>', unsafe_allow_html=True)
+            cm, cs = df.attrs["curve"]
+            fig = go.Figure()
+            if len(cm) >= 2:
+                fig.add_trace(go.Scatter(x=cm, y=cs, name="Measured cube calibration", mode="lines+markers", line=dict(width=2.4)))
+            else:
+                st.info("Enter at least two complete cube-test records with actual maturity readings to build the calibration curve.")
+            st.plotly_chart(style_fig(fig, 400, "Maturity (°C·hr)", "Strength (MPa)"), use_container_width=True)
+            st.caption("Piecewise-linear interpolation between measured cube-test points. No extrapolation beyond the measured range.")
+    with p2:
+        card_calculator("p")
+        card_strength_table(comparison_df(df))
+
+
 def page_upload():
     ss = st.session_state
     card_upload("u", title="Upload your file (CSV or Excel)", hint=False)
@@ -1772,6 +1796,7 @@ PAGE_FUNCS = {
     "Home": page_home,
     "Live Monitoring": page_live,
     "Cube Test Comparison": page_compare,
+    "Strength Prediction": page_prediction,
     "Upload Dataset": page_upload,
     "Temperature Alerts": page_alerts,
     "Cube Test Data": page_cube,
@@ -1782,6 +1807,7 @@ PAGE_SUBTITLE = {
     "Home": "Welcome to the concrete curing monitoring system.",
     "Live Monitoring": "Real-time temperature, maturity and predicted strength from the embedded sensors.",
     "Cube Test Comparison": "Compare maturity-based live strength against lab cube compression results.",
+    "Strength Prediction": "Estimate strength from maturity and explore the calibrated strength curve.",
     "Upload Dataset": "Load a CSV or Excel file of sensor readings to drive the whole dashboard.",
     "Temperature Alerts": "Configure temperature limits and email notifications.",
     "Cube Test Data": "Record and review compression test results.",
