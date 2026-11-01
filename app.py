@@ -1,7 +1,8 @@
+
 """
 IoT Based Concrete Curing & Strength Monitoring System.
 Professional multi-tab Streamlit dashboard (Home, Live Monitoring, Upload, Alerts, Cube Tests, Strength Prediction, Reports, Settings).
-
+ 
 Run:  streamlit run app.py
 """
 import os
@@ -13,25 +14,25 @@ import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
-
+ 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-
+ 
 try:
     from supabase import create_client
 except Exception:  # supabase is optional
     create_client = None
-
+ 
 # ============================================================== PAGE CONFIG
 st.set_page_config(
     page_title="Concrete Curing & Strength Monitoring",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
+ 
 # ============================================================== SUPABASE (optional, keys from environment ONLY)
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().strip('"').strip("'")
 SUPABASE_KEY = (os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_KEY", "")).strip().strip('"').strip("'")
@@ -46,7 +47,7 @@ if create_client and SUPABASE_URL.startswith("https://") and SUPABASE_KEY:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception:
         supabase = None
-
+ 
 def secret_or_env(name, default=""):
     try:
         value = st.secrets.get(name, "")
@@ -55,15 +56,15 @@ def secret_or_env(name, default=""):
     except Exception:
         pass
     return os.environ.get(name, default).strip()
-
-
+ 
+ 
 DISPLAY_TZ = secret_or_env("DISPLAY_TZ", "Asia/Kolkata")
-
-
+ 
+ 
 def get_alert_key():
     return secret_or_env("THINGSPEAK_ALERT_KEY")
-
-
+ 
+ 
 def send_email_alert(subject, message):
     key = get_alert_key()
     if not key:
@@ -77,14 +78,14 @@ def send_email_alert(subject, message):
         return "Sent" if response.ok else f"HTTP {response.status_code}: {response.text[:160]}"
     except requests.RequestException as exc:
         return f"Request failed: {exc}"
-
-
+ 
+ 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_thingspeak_alert_history(api_key, count=100):
     """Fetch ThingSpeak Alerts API history (ThingSpeak retains 7 days)."""
     if not api_key:
         return [], "Missing THINGSPEAK_ALERT_KEY"
-
+ 
     try:
         response = requests.get(
             "https://api.thingspeak.com/alerts/history",
@@ -94,7 +95,7 @@ def fetch_thingspeak_alert_history(api_key, count=100):
         )
         response.raise_for_status()
         payload = response.json()
-
+ 
         if isinstance(payload, list):
             return payload, None
         if isinstance(payload, dict):
@@ -104,7 +105,7 @@ def fetch_thingspeak_alert_history(api_key, count=100):
                     return payload[key], None
             return [], "Unexpected ThingSpeak alert-history response format"
         return [], "Unexpected ThingSpeak alert-history response format"
-
+ 
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else "unknown"
         detail = ""
@@ -113,8 +114,8 @@ def fetch_thingspeak_alert_history(api_key, count=100):
         return [], f"ThingSpeak alert-history HTTP {status}: {detail}"
     except (requests.RequestException, ValueError) as exc:
         return [], f"Could not retrieve ThingSpeak alert history: {exc}"
-
-
+ 
+ 
 def normalize_alert_history(records):
     """Normalize ThingSpeak camelCase response fields into dashboard columns."""
     rows = []
@@ -143,8 +144,8 @@ def normalize_alert_history(records):
             "raw_payload": item,
         })
     return rows
-
-
+ 
+ 
 def archive_alert_history_in_supabase(rows):
     """Idempotently archive API records; requires the SQL table supplied with this app."""
     if supabase is None or not rows:
@@ -156,17 +157,17 @@ def archive_alert_history_in_supabase(rows):
         return True, f"Archived {len(rows)} ThingSpeak alert record(s) in Supabase."
     except Exception as exc:
         return False, f"Supabase alert archive unavailable: {exc}"
-
-
+ 
+ 
 def get_dashboard_alert_history():
     """Return archived records where available, otherwise the live 7-day API history."""
     api_records, api_error = fetch_thingspeak_alert_history(get_alert_key(), 100)
     normalized = normalize_alert_history(api_records)
-
+ 
     archive_message = ""
     if normalized and supabase is not None:
         _, archive_message = archive_alert_history_in_supabase(normalized)
-
+ 
     if supabase is not None:
         try:
             result = (
@@ -184,17 +185,17 @@ def get_dashboard_alert_history():
                 "Could not read Supabase alert archive. Run the supplied "
                 f"supabase_alert_history.sql file. Details: {exc}"
             )
-
+ 
     if normalized:
         return pd.DataFrame([
             {k: row.get(k) for k in
              ("requested_at", "sent_at", "subject", "status")}
             for row in normalized
         ]), api_error, archive_message
-
+ 
     return pd.DataFrame(columns=["requested_at", "sent_at", "subject", "status"]), api_error, archive_message
-
-
+ 
+ 
 @st.cache_data(ttl=15, show_spinner=False)
 def fetch_thingspeak(channel, read_key, field_map, count):
     if not str(channel).isdigit():
@@ -225,8 +226,8 @@ def fetch_thingspeak(channel, read_key, field_map, count):
     if output.empty:
         raise ValueError("No valid numeric readings in the selected core temperature field")
     return output.reset_index(drop=True)
-
-
+ 
+ 
 def load_thingspeak():
     ss = st.session_state
     try:
@@ -243,13 +244,13 @@ def load_thingspeak():
     except Exception as exc:
         ss.ts_error = str(exc)
         return None
-
-
+ 
+ 
 # ============================================================== CONSTANTS / DEFAULTS
 GRADES = {"M20": 20.0, "M25": 25.0, "M30": 30.0, "M35": 35.0, "M40": 40.0}
 CUBE_AGES = [3, 7, 14, 21, 28]
 DEFAULT_CUBE = {3: 18.5, 7: 27.3, 14: 35.8, 21: 42.1, 28: 48.7}
-
+ 
 # Sidebar pages and top-tab pages share one "page" state
 SIDEBAR = [
     "Home",
@@ -262,7 +263,7 @@ SIDEBAR = [
     "Download Report",
     "Settings",
 ]
-
+ 
 DEFAULT_STATE = {
     "user": None,
     "auth_mode": "Sign In",
@@ -305,12 +306,12 @@ for _k, _v in DEFAULT_STATE.items():
     st.session_state.setdefault(_k, _v)
 # Keep the visible source selector separate from the application data value.
 st.session_state.setdefault("source_choice_widget", st.session_state.get("source_choice", "ThingSpeak live"))
-
-
+ 
+ 
 # Local SQLite persists across browser refresh and application restarts on a persistent disk.
 # For cloud deployments with ephemeral disks, configure Supabase for durable storage.
 DB_PATH = Path(os.environ.get("CONCRETE_DB_PATH", str(Path(__file__).with_name("concrete_saved.sqlite3"))))
-
+ 
 def local_cube_connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), timeout=15)
@@ -320,7 +321,7 @@ def local_cube_connection():
         maturity_celsius_hours REAL)""")
     conn.commit()
     return conn
-
+ 
 def load_cube_calibration():
     if st.session_state.get("_cube_calibration_loaded"):
         return
@@ -341,7 +342,7 @@ def load_cube_calibration():
     except Exception as exc:
         st.session_state.cube_storage_error = str(exc)
         # Do not silently substitute temporary storage for a failed configured cloud database.
-
+ 
 def save_cube_calibration():
     rows = [{"age_days": int(age), "compressive_strength_mpa": float(strength),
              "maturity_celsius_hours": float(st.session_state.cube_maturity[age]) if age in st.session_state.cube_maturity else None}
@@ -363,9 +364,9 @@ def save_cube_calibration():
         return True, "Saved to local SQLite. For cloud hosting, connect Supabase or mount a persistent disk."
     except Exception as exc:
         return False, f"Save failed; records are not confirmed persistent: {exc}"
-
+ 
 load_cube_calibration()
-
+ 
 # ============================================================== THEME / CSS
 st.markdown(
     """
@@ -378,12 +379,18 @@ st.markdown(
     color-scheme: light;
 }
 html, body, [class*="css"] { font-family: 'Manrope', 'Segoe UI', sans-serif; }
-#MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+#MainMenu, footer { visibility: hidden; height: 0; }
+/* Keep the header (it holds the sidebar open/close arrow); only hide its toolbar. */
+header[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { visibility: hidden; }
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapseButton"] { visibility: visible !important; }
+section[data-testid="stSidebar"] { visibility: visible !important; }
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     background: var(--bg) !important; color: var(--text) !important;
 }
-.block-container { padding: 1.4rem 2.2rem 2.5rem 2.2rem; max-width: 1600px; }
-
+.block-container { padding: 2.6rem 2.2rem 2.5rem 2.2rem; max-width: 1600px; }
+ 
 /* ---------- Sidebar ---------- */
 section[data-testid="stSidebar"] {
     background: linear-gradient(185deg, #0a2230 0%, #0d3b4a 100%);
@@ -410,7 +417,7 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
 .side-box { border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05);
     border-radius:12px; padding:.75rem .95rem; margin-top:.8rem; font-size:.8rem; color:#a9c9d1 !important; }
 .side-box b { color:#fff !important; font-size:1rem; }
-
+ 
 /* ---------- Cards ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     background:#ffffff; border:1px solid var(--line) !important; border-radius:16px !important;
@@ -425,7 +432,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     border:1px solid #b6dfe2; border-radius:999px; padding:.4rem .9rem; font-weight:700; font-size:.8rem; }
 .upd { text-align:right; font-size:.72rem; color:var(--muted); line-height:1.3; }
 .upd b { color:var(--ink); font-size:.85rem; }
-
+ 
 /* ---------- KPI cards ---------- */
 .kpi { position:relative; overflow:hidden; display:flex; gap:16px; align-items:center;
     background:#fff; border:1px solid var(--line); border-radius:16px; padding:1.1rem 1.3rem 1.1rem 1.55rem;
@@ -444,7 +451,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 [data-testid="stMain"] .badge-ok  { background:#d7f3e3; color:#15803d !important; }
 [data-testid="stMain"] .badge-bad { background:#fee2e2; color:#b91c1c !important; }
 .note-ok { background:#e8f6f7; border:1px solid #b6dfe2; color:#0a5f68; border-radius:10px; padding:.6rem .8rem; font-size:.8rem; margin-top:.5rem; }
-
+ 
 /* ---------- Home page ---------- */
 .hero { position:relative; overflow:hidden; border-radius:22px; padding:2.3rem 2.6rem; margin-bottom:1.3rem;
     background:
@@ -474,7 +481,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 [data-testid="stMain"] .hero .hero-sub { color:#bfeff2 !important; }
 [data-testid="stMain"] .hero .hero-text, [data-testid="stMain"] .hero .hr-label,
 [data-testid="stMain"] .hero .hr-sub { color:rgba(255,255,255,.85) !important; }
-
+ 
 .section-head { font-size:1.25rem; font-weight:800; color:var(--ink); margin:1.6rem 0 .2rem 0; letter-spacing:-.01em; }
 .section-sub { color:var(--muted); font-size:.88rem; margin:0 0 .9rem 0; }
 .feat { background:#fff; border:1px solid var(--line); border-radius:16px; padding:1.2rem 1.25rem; height:100%;
@@ -491,7 +498,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 [data-testid="stMain"] .flow-no { color:#ffffff !important; }
 .flow-title { font-weight:800; font-size:.92rem; color:var(--ink); }
 .flow-text { font-size:.82rem; color:var(--muted); line-height:1.45; }
-
+ 
 /* ---------- Inputs / buttons ---------- */
 div[data-baseweb="input"], div[data-baseweb="select"] > div { background:#fff !important; border-radius:10px !important; }
 .stButton > button[kind="primary"], button[data-testid="stBaseButton-primary"] {
@@ -507,7 +514,7 @@ div[data-baseweb="input"], div[data-baseweb="select"] > div { background:#fff !i
     border-radius:14px; padding:.8rem 1rem; box-shadow:0 1px 2px rgba(10,34,48,.05); }
 [data-baseweb="tab-highlight"] { background-color: var(--teal) !important; }
 [data-testid="stMain"] button[data-baseweb="tab"] p { font-weight:700; }
-
+ 
 /* ---------- Readable text everywhere (high contrast) ---------- */
 [data-testid="stMain"] h1, [data-testid="stMain"] h2, [data-testid="stMain"] h3, [data-testid="stMain"] h4,
 [data-testid="stMain"] strong, [data-testid="stMain"] b, [data-testid="stMain"] p,
@@ -551,7 +558,7 @@ div[data-baseweb="input"], div[data-baseweb="select"] > div { background:#fff !i
 [data-testid="stMain"] [data-testid="stAlert"] div { color:#263449 !important; }
 [data-testid="stMain"] [data-testid="stDataFrame"] *, [data-testid="stMain"] [data-testid="stTable"] * { color:#263449 !important; }
 [data-testid="stMain"] [data-testid="stExpander"] summary p { color: var(--text) !important; font-weight:700; }
-
+ 
 @media (max-width: 900px) {
     .block-container { padding: 1rem 1rem 2rem 1rem; }
     .kpi { min-height:105px; padding:.9rem .9rem .9rem 1.2rem; }
@@ -561,8 +568,8 @@ div[data-baseweb="input"], div[data-baseweb="select"] > div { background:#fff !i
 """,
     unsafe_allow_html=True,
 )
-
-
+ 
+ 
 # ============================================================== CORE CALCULATIONS
 def fit_curve(cube: dict, cube_maturity: dict):
     """Return actual measured maturity/strength pairs; never synthesize maturity from age."""
@@ -575,8 +582,8 @@ def fit_curve(cube: dict, cube_maturity: dict):
     if len(points) < 2 or len({p[0] for p in points}) != len(points):
         return np.array([]), np.array([])
     return np.array([p[0] for p in points]), np.array([p[1] for p in points])
-
-
+ 
+ 
 def predict_strength(maturity, calibration_m, calibration_s):
     """Piecewise-linear interpolation, restricted to the measured calibration range."""
     values = np.asarray(maturity, dtype=float)
@@ -585,8 +592,8 @@ def predict_strength(maturity, calibration_m, calibration_s):
         valid = np.isfinite(values) & (values >= calibration_m[0]) & (values <= calibration_m[-1])
         result[valid] = np.interp(values[valid], calibration_m, calibration_s)
     return float(result) if result.ndim == 0 else result
-
-
+ 
+ 
 # ---- Standard strength-maturity curve (used when cube data is missing) ----------
 def standard_curve(maturity, grade_mpa, datum):
     """Typical OPC concrete: S = Su*k*(M-M0)/(1+k*(M-M0)).
@@ -596,8 +603,8 @@ def standard_curve(maturity, grade_mpa, datum):
     k = (0.89 / 0.11) / ((30.0 - datum) * 28 * 24 - M0)
     x = k * np.maximum(np.asarray(maturity, dtype=float) - M0, 0.0)
     return su * x / (1.0 + x)
-
-
+ 
+ 
 def cube_scale_factor(cube, cube_maturity, grade_mpa, datum):
     """Even ONE real cube result can adjust the standard curve. Ignores obviously wrong entries."""
     ratios = []
@@ -608,21 +615,21 @@ def cube_scale_factor(cube, cube_maturity, grade_mpa, datum):
             if base > 1.0 and 0.5 <= strength / base <= 2.0:
                 ratios.append(strength / base)
     return (float(np.median(ratios)) if ratios else 1.0), len(ratios)
-
-
+ 
+ 
 def estimate_strength(maturity, cube, cube_maturity, grade_mpa, datum):
     factor, _ = cube_scale_factor(cube, cube_maturity, grade_mpa, datum)
     return standard_curve(maturity, grade_mpa, datum) * factor
-
-
+ 
+ 
 def maturity_at_age(df: pd.DataFrame, age_h: float, datum: float, ref_t: float) -> float:
     """Return observed cumulative maturity at an elapsed age; no future extrapolation."""
     if df.empty or age_h < 0 or age_h > float(df["elapsed"].iloc[-1]):
         return np.nan
     return float(np.interp(age_h, df["elapsed"], df["maturity"]))
-
-
-
+ 
+ 
+ 
 def simulate_df() -> pd.DataFrame:
     """Demo dataset (48 h, hourly) used until a real CSV is uploaded."""
     n = 49
@@ -634,8 +641,8 @@ def simulate_df() -> pd.DataFrame:
     return pd.DataFrame(
         {"ts": [now - timedelta(hours=int(n - 1 - i)) for i in h], "core": core, "surface": surface, "ambient": ambient}
     )
-
-
+ 
+ 
 def normalize_df(raw: pd.DataFrame) -> pd.DataFrame:
     """Recognize common timestamp/temperature names, including ThingSpeak CSV exports."""
     if raw.empty:
@@ -676,8 +683,8 @@ def normalize_df(raw: pd.DataFrame) -> pd.DataFrame:
     if out.empty:
         raise ValueError("The file has no rows with both a valid timestamp and a numeric core temperature.")
     return out
-
-
+ 
+ 
 def get_data(source=None) -> pd.DataFrame:
     """Explicit source selection prevents live ThingSpeak from masking uploaded CSV."""
     ss = st.session_state
@@ -725,7 +732,7 @@ def get_data(source=None) -> pd.DataFrame:
     df["strength_basis"] = np.where(np.isfinite(cal), "Cube-calibrated", "Standard curve")
     df.attrs["curve"] = (calibration_m, calibration_s)
     return df
-
+ 
 def data_ready(df):
     if df.empty:
         ss = st.session_state
@@ -739,8 +746,8 @@ def data_ready(df):
             st.info("No readings available for this source.")
         return False
     return True
-
-
+ 
+ 
 def source_banner(df):
     ss = st.session_state
     if ss.source_choice == "ThingSpeak live" and ss.ts_enabled and ss.ts_error:
@@ -754,19 +761,19 @@ def source_banner(df):
             st.success(f"LIVE ThingSpeak | Channel {ss.ts_channel} | {len(df)} readings | Last sensor sample: {latest:%d %b %Y %H:%M:%S} {DISPLAY_TZ} | Age: {max(age,0):.1f} min")
     elif not (ss.ts_enabled and ss.ts_error):
         st.info(f"Data source: {ss.data_source} — not live ThingSpeak data.")
-
-
+ 
+ 
 def alert_state(temp: float):
     thr, typ = st.session_state.alert_temp, st.session_state.alert_type
     triggered = temp > thr if typ == "Above" else temp < thr
     return triggered, thr, typ
-
-
+ 
+ 
 def handle_alert(temp: float):
     triggered, thr, typ = alert_state(temp)
     if not triggered:
         return
-
+ 
     # Email via ThingSpeak, throttled so a hot slab doesn't flood the inbox
     if st.session_state.email_enabled:
         gap_s = float(st.session_state.email_gap_min) * 60
@@ -778,8 +785,8 @@ def handle_alert(temp: float):
             if status == "Sent":
                 st.session_state.last_email_ts = time.time()
             st.session_state.alert_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": "Email (ThingSpeak)", "Status": status, "Message": msg})
-
-
+ 
+ 
 # ============================================================== PLOTLY HELPERS (high-contrast professional light theme)
 def style_fig(fig, height=330, xtitle=None, ytitle=None):
     # Explicitly set every text and axis colour: Streamlit's theme does not
@@ -809,8 +816,8 @@ def style_fig(fig, height=330, xtitle=None, ytitle=None):
     fig.update_xaxes(**axis_common, title=xtitle)
     fig.update_yaxes(**axis_common, title=ytitle)
     return fig
-
-
+ 
+ 
 def fig_live(df, height=330):
     fig = go.Figure()
     for col, name, color in [("core", "Core Temp (°C)", "#ea580c"), ("surface", "Surface Temp (°C)", "#0e7c86"), ("ambient", "Ambient Temp (°C)", "#4f46e5")]:
@@ -818,8 +825,8 @@ def fig_live(df, height=330):
             fig.add_trace(go.Scatter(x=df["elapsed"], y=df[col], name=name, mode="lines", line=dict(color=color, width=2.4)))
     fig.add_hline(y=st.session_state.alert_temp, line_dash="dash", line_color="#dc2626", annotation_text="Alert limit")
     return style_fig(fig, height, "Time (hours)", "Temperature (°C)")
-
-
+ 
+ 
 def comparison_df(df):
     calibration_m, calibration_s = df.attrs["curve"]
     rows = []
@@ -835,21 +842,21 @@ def comparison_df(df):
             "Difference (MPa)": round(live - cube, 1) if cube is not None and np.isfinite(live) else None,
         })
     return pd.DataFrame(rows)
-
-
+ 
+ 
 def fig_compare(cmp, height=330):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=cmp["Age (Days)"], y=cmp["Calibrated Strength (MPa)"], name="Cube-calibrated estimate", mode="lines+markers", line=dict(color="#4f46e5", width=2.6)))
     fig.add_trace(go.Scatter(x=cmp["Age (Days)"], y=cmp["Cube Strength (MPa)"], name="Measured cube test", mode="lines+markers", line=dict(color="#0e7c86", width=2.6)))
     fig.update_xaxes(tickvals=CUBE_AGES)
     return style_fig(fig, height, "Cube Age (Days)", "Strength (MPa)")
-
-
+ 
+ 
 # ============================================================== REUSABLE CARDS
 EXCEL_EXTS = (".xlsx", ".xlsm", ".xls")
 UPLOAD_TYPES = ["csv", "tsv", "xlsx", "xls", "xlsm"]
-
-
+ 
+ 
 def read_uploaded_table(f, sheet=None) -> pd.DataFrame:
     """Read a CSV / TSV / Excel upload into a raw DataFrame (no column renaming)."""
     name = f.name.lower()
@@ -871,8 +878,8 @@ def read_uploaded_table(f, sheet=None) -> pd.DataFrame:
         except UnicodeDecodeError as exc:
             last_exc = exc
     raise ValueError(f"Could not decode the file: {last_exc}")
-
-
+ 
+ 
 def card_upload(ctx, title="1. Upload Dataset", hint=True):
     ss = st.session_state
     with st.container(border=True):
@@ -912,37 +919,37 @@ def card_upload(ctx, title="1. Upload Dataset", hint=True):
             st.success(f"Dataset uploaded successfully! ({ss.upload_name})")
         elif hint:
             st.caption("Upload a CSV or Excel file (.csv, .xlsx, .xls). It needs a timestamp column and a core-temperature column.")
-
-
+ 
+ 
 def fig_maturity(df, height=300):
     fig = go.Figure(go.Scatter(x=df["elapsed"], y=df["maturity"], mode="lines", name="Maturity",
                                line=dict(color="#0e7c86", width=2.6), fill="tozeroy", fillcolor="rgba(14,124,134,.10)"))
     return style_fig(fig, height, "Time (hours)", "°C·hr")
-
-
+ 
+ 
 def fig_strength(df, height=300):
     fig = go.Figure(go.Scatter(x=df["elapsed"], y=df["strength"], mode="lines", name="Strength",
                                line=dict(color="#4f46e5", width=2.6), fill="tozeroy", fillcolor="rgba(79,70,229,.09)"))
     return style_fig(fig, height, "Time (hours)", "MPa")
-
-
-
+ 
+ 
+ 
 def card_grade(ctx):
     with st.container(border=True):
         st.markdown('<div class="card-title">2. Select Concrete Grade</div>', unsafe_allow_html=True)
         g = st.selectbox("Grade", list(GRADES), index=list(GRADES).index(st.session_state.grade), key=f"{ctx}_grade", label_visibility="collapsed")
         st.session_state.grade = g
         st.caption(f"Target 28-day strength: **{GRADES[g]:.0f} MPa**")
-
-
+ 
+ 
 def card_alert(ctx, title="3. Set Temperature Alert"):
     with st.container(border=True):
         st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         st.session_state.alert_temp = c1.number_input("Alert Temperature (°C)", value=float(st.session_state.alert_temp), step=1.0, key=f"{ctx}_at")
         st.session_state.alert_type = c2.selectbox("Alert Type", ["Above", "Below"], index=["Above", "Below"].index(st.session_state.alert_type), key=f"{ctx}_aty")
-
-
+ 
+ 
 def card_cube_input(ctx):
     with st.container(border=True):
         st.markdown('<div class="card-title">Add Cube Test Data (Compression)</div>', unsafe_allow_html=True)
@@ -980,7 +987,7 @@ def card_cube_input(ctx):
         if st.session_state.get("cube_storage_error"):
             st.error("Could not load saved calibration: " + st.session_state.cube_storage_error)
         st.caption("Storage: " + st.session_state.get("cube_storage_backend", "Not yet verified"))
-
+ 
 def card_cube_table():
     with st.container(border=True):
         st.markdown('<div class="card-title">Cube Test Calibration Records</div>', unsafe_allow_html=True)
@@ -999,8 +1006,8 @@ def card_cube_table():
             st.warning("At least two complete cube records with distinct maturity values are required.")
         else:
             st.success("Cube test calibration records saved.")
-
-
+ 
+ 
 def kpi(label, value, unit, sub, tone):
     st.markdown(
         f'<div class="kpi kpi-{tone}"><div>'
@@ -1008,8 +1015,8 @@ def kpi(label, value, unit, sub, tone):
         f'<div class="kpi-sub">{sub}</div></div></div>',
         unsafe_allow_html=True,
     )
-
-
+ 
+ 
 def check_live_alert(df):
     """Send an alert email when the latest LIVE reading breaches the limit (throttled in handle_alert)."""
     if df.empty or st.session_state.data_source != "ThingSpeak":
@@ -1018,8 +1025,8 @@ def check_live_alert(df):
     age_min = (pd.Timestamp.now(tz=DISPLAY_TZ).tz_localize(None) - latest["ts"]).total_seconds() / 60
     if 0 <= age_min <= st.session_state.ts_stale_minutes:
         handle_alert(float(latest["core"]))
-
-
+ 
+ 
 def kpi_row(df):
     latest = df.iloc[-1]
     triggered, thr, typ = alert_state(float(latest["core"]))
@@ -1042,8 +1049,8 @@ def kpi_row(df):
             st.caption(f"Standard curve adjusted using {n_used} measured cube result(s).")
         else:
             st.caption("No usable cube result yet. Enter a cube strength with its maturity to improve accuracy.")
-
-
+ 
+ 
 def card_monitoring_table(df):
     with st.container(border=True):
         st.markdown('<div class="card-title">Latest Monitoring Data</div>', unsafe_allow_html=True)
@@ -1060,8 +1067,8 @@ def card_monitoring_table(df):
             "Status": ["Alert" if x else "Normal" for x in triggered],
         })
         st.dataframe(out, hide_index=True, use_container_width=True)
-
-
+ 
+ 
 def card_calculator(ctx):
     with st.container(border=True):
         st.markdown('<div class="card-title">Nurse–Saul Maturity & Strength Calculator</div>', unsafe_allow_html=True)
@@ -1084,15 +1091,15 @@ def card_calculator(ctx):
                 r2.metric("Estimated strength", f"{res[1]:.2f} MPa")
             else:
                 r2.info("Strength unavailable: maturity is outside the measured calibration range or calibration data is insufficient.")
-
-
+ 
+ 
 def card_strength_table(cmp):
     with st.container(border=True):
         st.markdown('<div class="card-title">Strength in MPa</div>', unsafe_allow_html=True)
         st.dataframe(cmp, hide_index=True, use_container_width=True)
         st.caption("Cube-calibrated estimates use recorded maturity/strength pairs and are shown only within the measured calibration range. They are not measured compression-test results.")
-
-
+ 
+ 
 # ============================================================== PAGES
 def page_live():
     def body():
@@ -1119,13 +1126,13 @@ def page_live():
         card_monitoring_table(df)
         with st.expander("Export raw data"):
             st.download_button("Download CSV", df.to_csv(index=False).encode(), "monitoring_data.csv", "text/csv")
-
+ 
     if st.session_state.auto_refresh:
         st.fragment(run_every=st.session_state.refresh_s)(body)()
     else:
         body()
-
-
+ 
+ 
 def page_compare():
     df = get_data()
     if not data_ready(df):
@@ -1139,8 +1146,8 @@ def page_compare():
     with g2:
         card_strength_table(cmp)
     card_cube_input("c")
-
-
+ 
+ 
 def page_prediction():
     df = get_data()
     if not data_ready(df):
@@ -1162,8 +1169,8 @@ def page_prediction():
     with p2:
         card_calculator("p")
         card_strength_table(comparison_df(df))
-
-
+ 
+ 
 def page_upload():
     ss = st.session_state
     card_upload("u", title="Upload your file (CSV or Excel)", hint=False)
@@ -1174,7 +1181,7 @@ def page_upload():
         return
     raw = ss.get("upload_raw")
     st.write("")
-
+ 
     interval = df["ts"].diff().dt.total_seconds().median()
     interval_txt = "-" if not np.isfinite(interval) else (f"{interval / 60:.1f} min" if interval < 3600 else f"{interval / 3600:.1f} h")
     last_strength = df["strength"].iloc[-1]
@@ -1191,7 +1198,7 @@ def page_upload():
     m8.metric("Latest maturity", f"{df['maturity'].iloc[-1]:,.0f} °C·hr")
     m9.metric("Latest est. strength", f"{last_strength:.1f} MPa" if pd.notna(last_strength) else "N/A")
     st.write("")
-
+ 
     with st.container(border=True):
         st.markdown('<div class="card-title">Dataset Details</div>', unsafe_allow_html=True)
         t_charts, t_stats, t_cols, t_proc, t_raw = st.tabs(["Charts", "Statistics", "Columns", "Processed data", "Original file"])
@@ -1226,7 +1233,7 @@ def page_upload():
             if raw is not None:
                 st.caption("Your file exactly as uploaded.")
                 st.dataframe(raw.head(500), hide_index=True, use_container_width=True)
-
+ 
     st.write("")
     calc_col, next_col = st.columns([1.3, 1])
     with calc_col:
@@ -1248,9 +1255,9 @@ def page_alerts():
     df = get_data()
     if not df.empty:
         check_live_alert(df)      # keep email alerts working even if only this page is open
-
+ 
     history_df, history_error, archive_message = get_dashboard_alert_history()
-
+ 
     # ---------- graph + alert settings
     left, right = st.columns([1.7, 1])
     with left:
@@ -1283,7 +1290,7 @@ def page_alerts():
                     fetch_thingspeak_alert_history.clear()
                 else:
                     st.error(f"Email status: {status}")
-
+ 
     # ---------- messages that were sent
     st.write("")
     with st.container(border=True):
@@ -1305,15 +1312,15 @@ def page_alerts():
                                file_name="thingspeak_alert_history.csv", mime="text/csv")
         elif not history_error:
             st.info("No alert messages have been sent yet.")
-
+ 
     with st.container(border=True):
         st.markdown('<div class="card-title">Alerts Triggered by This Dashboard</div>', unsafe_allow_html=True)
         if ss.alert_log:
             st.dataframe(pd.DataFrame(ss.alert_log), hide_index=True, use_container_width=True)
         else:
             st.caption("No alerts have been triggered by this dashboard during the current session.")
-
-
+ 
+ 
 def page_cube():
     c1, c2 = st.columns([1.4, 1])
     with c1:
@@ -1327,8 +1334,8 @@ def page_cube():
                 fig = go.Figure(go.Bar(x=[f"{a} d" for a in sorted(cd)], y=[cd[a] for a in sorted(cd)],
                                        marker_color="#0e7c86", text=[cd[a] for a in sorted(cd)], textposition="outside"))
                 st.plotly_chart(style_fig(fig, 300, "Age", "MPa"), use_container_width=True)
-
-
+ 
+ 
 # ============================================================== HOME (welcome) PAGE
 # Edit this block to describe your own device.
 DEVICE_INFO = {
@@ -1344,7 +1351,7 @@ DEVICE_INFO = {
         ("Ambient temperature", "Site air temperature around the element.", "ts_ambient_field"),
     ],
 }
-
+ 
 FEATURES = [
     ("f-heat", '<path d="M10 14.5V5a2 2 0 1 1 4 0v9.5a4 4 0 1 1-4 0z"/>',
      "Live temperature monitoring",
@@ -1359,12 +1366,12 @@ FEATURES = [
      "Alerts and reports",
      "Set a temperature limit, receive email alerts and download a PDF or Excel report at any time."),
 ]
-
-
+ 
+ 
 def page_home():
     ss = st.session_state
     esc = _html.escape
-
+ 
     # ---- Hero (information only: no live readings on this page) ----
     reading = ('<div class="hero-read"><div class="hr-label">What it does</div><div class="hr-list">'
                '<div>Tracks core, surface and ambient temperature</div>'
@@ -1393,7 +1400,7 @@ def page_home():
     b1.button("Live Monitoring", type="primary", use_container_width=True, key="h_go_dash", on_click=goto, args=("Live Monitoring",))
     b2.button("Upload Dataset", use_container_width=True, key="h_go_up", on_click=goto, args=("Upload Dataset",))
     b3.button("Download Report", use_container_width=True, key="h_go_rep", on_click=goto, args=("Download Report",))
-
+ 
     # ---- About ----
     st.markdown('<div class="section-head">About this dashboard</div>'
                 '<div class="section-sub">Everything you need to decide when formwork can come off, in one place.</div>',
@@ -1404,7 +1411,7 @@ def page_home():
             f'<div class="feat {tone}"><svg viewBox="0 0 24 24">{icon}</svg>'
             f'<div class="feat-title">{title}</div><div class="feat-text">{text}</div></div>',
             unsafe_allow_html=True)
-
+ 
     # ---- Device ----
     st.markdown(f'<div class="section-head">Your monitoring device</div>'
                 f'<div class="section-sub">{esc(DEVICE_INFO["name"])}: how readings get from the concrete to this screen.</div>',
@@ -1427,7 +1434,7 @@ def page_home():
                 rows.append({"Sensor": name, "ThingSpeak field": f"Field {n}" if n else "Not connected", "Purpose": purpose})
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
             st.caption(f"ThingSpeak channel: {ss.ts_channel or 'not set'}. Change fields in Settings.")
-
+ 
     # ---- Basic settings ----
     st.markdown('<div class="section-head">Basic settings</div>'
                 '<div class="section-sub">Set these once to get started. You can change them at any time.</div>',
@@ -1447,8 +1454,8 @@ def page_home():
         ss.auto_refresh = r2[3].toggle("Auto-refresh live data", value=ss.auto_refresh, key="h_auto")
         st.caption(f"Target 28-day strength for {ss.grade}: {GRADES[ss.grade]:.0f} MPa. "
                    "More options (ThingSpeak connection, refresh interval, email alerts) are in Settings.")
-
-
+ 
+ 
 def page_settings():
     c1, c2 = st.columns(2)
     with c1:
@@ -1485,8 +1492,8 @@ def page_settings():
             st.session_state.project = st.text_input("Project name", value=st.session_state.project, key="s_proj")
             st.session_state.operator = st.text_input("Operator", value=st.session_state.operator, key="s_op")
             st.session_state.email_enabled = st.toggle("Enable email alerts (ThingSpeak)", value=st.session_state.email_enabled, key="s_email")
-
-
+ 
+ 
 # ============================================================== REPORT BUILDERS
 def report_summary(df):
     """Ordered (label, value) rows describing the monitoring period."""
@@ -1525,15 +1532,15 @@ def report_summary(df):
     if np.isfinite(strength):
         rows.append(("Share of 28-day target", f"{strength / target * 100:.0f}%"))
     return rows
-
-
+ 
+ 
 def _fig_png(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=170, bbox_inches="tight")
     buf.seek(0)
     return buf
-
-
+ 
+ 
 def _style_ax(ax, xl, yl):
     ax.set_xlabel(xl, fontsize=8, color="#334155")
     ax.set_ylabel(yl, fontsize=8, color="#334155")
@@ -1543,13 +1550,13 @@ def _style_ax(ax, xl, yl):
         ax.spines[side].set_visible(False)
     for side in ("left", "bottom"):
         ax.spines[side].set_color("#cbd5e1")
-
-
+ 
+ 
 def report_chart_images(df, cmp):
     """Return PNG buffers for the PDF report (pyplot-free, so it is thread safe)."""
     from matplotlib.figure import Figure
     images = {}
-
+ 
     fig = Figure(figsize=(8, 3.1))
     ax = fig.subplots()
     for col, label, color in (("core", "Core", "#ea580c"), ("surface", "Surface", "#0e7c86"), ("ambient", "Ambient", "#4f46e5")):
@@ -1559,7 +1566,7 @@ def report_chart_images(df, cmp):
     ax.legend(fontsize=7, frameon=False, ncol=4, loc="lower left", bbox_to_anchor=(0, 1.0))
     _style_ax(ax, "Time (hours)", "Temperature (°C)")
     images["temp"] = _fig_png(fig)
-
+ 
     fig = Figure(figsize=(8, 2.8))
     a1, a2 = fig.subplots(1, 2)
     a1.plot(df["elapsed"], df["maturity"], color="#0e7c86", linewidth=1.8)
@@ -1572,7 +1579,7 @@ def report_chart_images(df, cmp):
     _style_ax(a2, "Time (hours)", "MPa")
     fig.tight_layout()
     images["maturity"] = _fig_png(fig)
-
+ 
     if cmp["Cube Strength (MPa)"].notna().any():
         fig = Figure(figsize=(8, 2.8))
         ax = fig.subplots()
@@ -1583,23 +1590,23 @@ def report_chart_images(df, cmp):
         _style_ax(ax, "Cube age (days)", "Strength (MPa)")
         images["cube"] = _fig_png(fig)
     return images
-
-
+ 
+ 
 def _fmt(v, nd=1):
     if v is None or (isinstance(v, float) and not np.isfinite(v)):
         return "-"
     if isinstance(v, (int, float, np.integer, np.floating)):
         return f"{v:,.{nd}f}"
     return str(v)
-
-
+ 
+ 
 def build_pdf_report(df, cmp, opts):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
+ 
     ss = st.session_state
     petrol, teal, line = colors.HexColor("#0d3b4a"), colors.HexColor("#0e7c86"), colors.HexColor("#dbe3ea")
     h2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=12.5, textColor=petrol, spaceBefore=12, spaceAfter=6)
@@ -1608,7 +1615,7 @@ def build_pdf_report(df, cmp, opts):
     cell = ParagraphStyle("cell", parent=body, fontSize=8, leading=10)
     esc = _html.escape
     width = A4[0] - 32 * mm
-
+ 
     def table(rows, widths, header=True):
         t = Table(rows, colWidths=widths, repeatRows=1 if header else 0)
         style = [("FONT", (0, 0), (-1, -1), "Helvetica", 8), ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#26344a")),
@@ -1620,7 +1627,7 @@ def build_pdf_report(df, cmp, opts):
                       ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8)]
         t.setStyle(TableStyle(style))
         return t
-
+ 
     story = []
     banner = Table([[Paragraph(f'<font color="white" size="17"><b>{esc(opts["title"])}</b></font><br/>'
                                f'<font color="#bfeff2" size="9">{esc(str(ss.project))}  |  Generated {datetime.now():%d %b %Y, %H:%M}</font>', body)]],
@@ -1629,11 +1636,11 @@ def build_pdf_report(df, cmp, opts):
                                 ("TOPPADDING", (0, 0), (-1, -1), 14), ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
                                 ("LINEBELOW", (0, 0), (-1, -1), 3, teal)]))
     story += [banner, Spacer(1, 6)]
-
+ 
     story.append(Paragraph("Summary", h2))
     story.append(table([[Paragraph(f"<b>{esc(k)}</b>", cell), Paragraph(esc(v), cell)] for k, v in opts["summary"]],
                        [58 * mm, width - 58 * mm], header=False))
-
+ 
     if opts["charts"]:
         imgs = report_chart_images(df, cmp)
         story.append(KeepTogether([Paragraph("Temperature history", h2), Image(imgs["temp"], width=width, height=width * 0.39)]))
@@ -1641,7 +1648,7 @@ def build_pdf_report(df, cmp, opts):
         if "cube" in imgs:
             story.append(KeepTogether([Paragraph("Strength comparison: live estimate vs cube test", h2),
                                        Image(imgs["cube"], width=width, height=width * 0.35)]))
-
+ 
     if opts["cube"]:
         story.append(Paragraph("Cube test records", h2))
         rows = [["Age (days)", "Maturity (C-hr)", "Calibrated (MPa)", "Cube test (MPa)", "Difference (MPa)"]]
@@ -1651,7 +1658,7 @@ def build_pdf_report(df, cmp, opts):
         story.append(table(rows, [width / 5] * 5))
         if not cmp["Cube Strength (MPa)"].notna().any():
             story += [Spacer(1, 3), Paragraph("No cube test results have been recorded yet.", small)]
-
+ 
     if opts["data"]:
         story.append(Paragraph("Latest 15 readings", h2))
         t = df.iloc[::-1].head(15)
@@ -1660,7 +1667,7 @@ def build_pdf_report(df, cmp, opts):
             rows.append([f"{r['ts']:%Y-%m-%d %H:%M}", _fmt(r["core"]), _fmt(r["surface"]), _fmt(r["ambient"]),
                          _fmt(r["maturity"]), _fmt(r["strength"]), "Alert" if alert_state(float(r["core"]))[0] else "Normal"])
         story.append(table(rows, [34 * mm] + [(width - 34 * mm) / 6] * 6))
-
+ 
     if opts["alerts"]:
         story.append(Paragraph("Alerts triggered during this session", h2))
         log = ss.alert_log
@@ -1671,11 +1678,11 @@ def build_pdf_report(df, cmp, opts):
             story.append(table(rows, [22 * mm, 32 * mm, 22 * mm, width - 76 * mm]))
         else:
             story.append(Paragraph("No alerts were triggered by this dashboard during the current session.", body))
-
+ 
     story += [Spacer(1, 10), Paragraph(
         "Notes: strength values are maturity-based estimates (Nurse-Saul method). They are not laboratory compression-test "
         "results. Confirm critical decisions, such as formwork removal or loading, with measured cube tests and the engineer in charge.", small)]
-
+ 
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
@@ -1683,20 +1690,20 @@ def build_pdf_report(df, cmp, opts):
         canvas.drawString(16 * mm, 9 * mm, "IoT Based Concrete Curing & Strength Monitoring System")
         canvas.drawRightString(A4[0] - 16 * mm, 9 * mm, f"Page {doc.page}")
         canvas.restoreState()
-
+ 
     buf = io.BytesIO()
     SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=16 * mm,
                       title=opts["title"], author=str(ss.operator)).build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
-
-
+ 
+ 
 def readings_export_frame(df):
     out = df[["ts", "elapsed", "core", "surface", "ambient", "maturity", "strength", "strength_basis"]].copy()
     out.columns = ["Date & Time", "Elapsed (h)", "Core Temp (°C)", "Surface Temp (°C)", "Ambient Temp (°C)",
                    "Maturity (°C·hr)", "Estimated Strength (MPa)", "Strength Basis"]
     return out
-
-
+ 
+ 
 def build_excel_report(df, cmp, summary):
     from openpyxl.styles import Alignment, Font, PatternFill
     buf = io.BytesIO()
@@ -1719,8 +1726,8 @@ def build_excel_report(df, cmp, summary):
                 ws.column_dimensions[col[0].column_letter].width = min(max(12, longest + 3), 60)
             ws.freeze_panes = "A2"
     return buf.getvalue()
-
-
+ 
+ 
 def page_report():
     ss = st.session_state
     df = get_data()
@@ -1730,7 +1737,7 @@ def page_report():
     cmp = comparison_df(df)
     summary = report_summary(df)
     signature = (ss.source_choice, len(df), str(df["ts"].iloc[-1]), ss.grade, ss.alert_temp, ss.datum_temp)
-
+ 
     left, right = st.columns([1, 1.25])
     with left:
         with st.container(border=True):
@@ -1746,7 +1753,7 @@ def page_report():
         with st.container(border=True):
             st.markdown('<div class="card-title">Report Preview</div>', unsafe_allow_html=True)
             st.dataframe(pd.DataFrame(summary, columns=["Parameter", "Value"]), hide_index=True, use_container_width=True, height=360)
-
+ 
     if generate:
         files, errors = {}, []
         with st.spinner("Building your report..."):
@@ -1766,7 +1773,7 @@ def page_report():
         files["signature"] = signature
         files["errors"] = errors
         ss.report_files = files
-
+ 
     rf = ss.get("report_files")
     st.write("")
     with st.container(border=True):
@@ -1790,8 +1797,8 @@ def page_report():
             d3.download_button("Download readings (CSV)", rf["csv"], f"monitoring_data_{stamp}.csv", "text/csv",
                                use_container_width=True, key="r_dl_csv", icon=":material/csv:")
             st.caption(f"Generated {stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[9:11]}:{stamp[11:]} from {ss.data_source}.")
-
-
+ 
+ 
 PAGE_FUNCS = {
     "Home": page_home,
     "Live Monitoring": page_live,
@@ -1814,15 +1821,15 @@ PAGE_SUBTITLE = {
     "Download Report": "Generate and download a PDF, Excel or CSV report of the monitoring data.",
     "Settings": "Maturity method, refresh behaviour and operator details.",
 }
-
-
+ 
+ 
 # Authentication removed: dashboard opens directly.
-
+ 
 # ============================================================== SIDEBAR
 def goto(p):
     st.session_state.page = p
-
-
+ 
+ 
 with st.sidebar:
     st.markdown(
         '<div class="brand"><div class="brand-logo">'
@@ -1844,29 +1851,29 @@ with st.sidebar:
         f'Created by: <b style="font-size:.82rem">{_html.escape(str(st.session_state.operator))}</b></div>',
         unsafe_allow_html=True,
     )
-
+ 
 # ============================================================== HEADER + TOP TABS
 page = st.session_state.page
-
-
+ 
+ 
 source_options = ["ThingSpeak live", "Uploaded File", "Supabase", "Demo (sample data)"]
 # Apply programmatic changes before the widget is created (Streamlit requirement).
 if st.session_state.pop("_sync_source_choice_widget", False):
     st.session_state["source_choice_widget"] = st.session_state.get("source_choice", "ThingSpeak live")
-
-
+ 
+ 
 def on_source_choice_change():
     st.session_state["source_choice"] = st.session_state["source_choice_widget"]
-
-
+ 
+ 
 def render_source_selector():
     st.selectbox(
         "Dashboard data source", source_options,
         key="source_choice_widget", on_change=on_source_choice_change,
         help="Choose Uploaded File after uploading to display your CSV/Excel data in every chart. ThingSpeak live never silently switches to demo readings."
     )
-
-
+ 
+ 
 if page == "Upload Dataset":
     # Nothing but the page title until a file has been uploaded.
     st.markdown('<h1 class="page-title">Upload Dataset</h1>', unsafe_allow_html=True)
@@ -1885,6 +1892,6 @@ elif page != "Home":
                         f"{st.session_state.data_source} · NOT LIVE")
         st.markdown(f'<div style="text-align:right"><span class="pill-online">{status_label}</span></div>', unsafe_allow_html=True)
     st.write("")
-
+ 
 # ============================================================== ROUTER
 PAGE_FUNCS[page]()
