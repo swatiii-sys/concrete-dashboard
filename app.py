@@ -254,16 +254,14 @@ DEFAULT_CUBE = {3: 18.5, 7: 27.3, 14: 35.8, 21: 42.1, 28: 48.7}
 SIDEBAR = [
     "Home",
     "Dashboard",
+    "Live Monitoring",
     "Upload Dataset",
     "Temperature Alerts",
     "Cube Test Data",
+    "Cube Test Comparison",
     "Download Report",
     "Settings",
 ]
-TOP_TABS = ["Home", "Dashboard", "Live Monitoring", "Cube Test Comparison", "Download Report", "Settings"]
-# top-tab label -> internal page name
-TAB_TO_PAGE = {t: t for t in TOP_TABS}
-PAGE_TO_TAB = {v: k for k, v in TAB_TO_PAGE.items()}
 
 DEFAULT_STATE = {
     "user": None,
@@ -413,16 +411,6 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
     border-radius:12px; padding:.75rem .95rem; margin-top:.8rem; font-size:.8rem; color:#a9c9d1 !important; }
 .side-box b { color:#fff !important; font-size:1rem; }
 
-/* ---------- Top tabs (radio styled as tabs) ---------- */
-div[role="radiogroup"][aria-label="top-nav"] { gap: 1.7rem; border-bottom: 1px solid var(--line); padding-bottom: 0; flex-wrap: wrap; }
-div[role="radiogroup"][aria-label="top-nav"] label > div:first-child { display:none; }
-div[role="radiogroup"][aria-label="top-nav"] label {
-    padding: .55rem .2rem; margin: 0; border-bottom: 3px solid transparent; cursor: pointer;
-}
-div[role="radiogroup"][aria-label="top-nav"] label p { font-weight: 600; color: var(--muted) !important; font-size:.9rem; }
-div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) { border-bottom-color: var(--teal); }
-div[role="radiogroup"][aria-label="top-nav"] label:has(input:checked) p { color: var(--teal-d) !important; font-weight: 800; }
-
 /* ---------- Cards ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     background:#ffffff; border:1px solid var(--line) !important; border-radius:16px !important;
@@ -480,6 +468,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 .hr-val { font-size:3.1rem; font-weight:800; line-height:1.1; letter-spacing:-.02em; }
 .hr-val small { font-size:1.2rem; font-weight:700; margin-left:5px; }
 .hr-sub { font-size:.78rem; margin-top:.25rem; }
+.hr-list { margin-top:.5rem; }
+.hr-list div { font-size:.9rem; font-weight:600; padding:.5rem 0; border-top:1px solid rgba(255,255,255,.22); }
 [data-testid="stMain"] .hero, [data-testid="stMain"] .hero * { color:#ffffff !important; }
 [data-testid="stMain"] .hero .hero-sub { color:#bfeff2 !important; }
 [data-testid="stMain"] .hero .hero-text, [data-testid="stMain"] .hero .hr-label,
@@ -688,12 +678,12 @@ def normalize_df(raw: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def get_data() -> pd.DataFrame:
+def get_data(source=None) -> pd.DataFrame:
     """Explicit source selection prevents live ThingSpeak from masking uploaded CSV."""
     ss = st.session_state
     base = None
     ss.ts_error = ""
-    source = ss.source_choice
+    source = source or ss.source_choice
     if source == "Uploaded File":
         if ss.raw_df is not None and not ss.raw_df.empty:
             base = ss.raw_df
@@ -883,10 +873,10 @@ def read_uploaded_table(f, sheet=None) -> pd.DataFrame:
     raise ValueError(f"Could not decode the file: {last_exc}")
 
 
-def card_upload(ctx):
+def card_upload(ctx, title="1. Upload Dataset", hint=True):
     ss = st.session_state
     with st.container(border=True):
-        st.markdown('<div class="card-title">1. Upload Dataset</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
         f = st.file_uploader("Choose a CSV or Excel file", type=UPLOAD_TYPES, key=f"{ctx}_upl",
                              label_visibility="collapsed",
                              help="Supported: .csv, .tsv, .xlsx, .xls, .xlsm")
@@ -920,7 +910,7 @@ def card_upload(ctx):
                     st.error(f"Could not read file: {e}")
         if ss.upload_name:
             st.success(f"Dataset uploaded successfully! ({ss.upload_name})")
-        else:
+        elif hint:
             st.caption("Upload a CSV or Excel file (.csv, .xlsx, .xls). It needs a timestamp column and a core-temperature column.")
 
 
@@ -945,9 +935,9 @@ def card_grade(ctx):
         st.caption(f"Target 28-day strength: **{GRADES[g]:.0f} MPa**")
 
 
-def card_alert(ctx):
+def card_alert(ctx, title="3. Set Temperature Alert"):
     with st.container(border=True):
-        st.markdown('<div class="card-title">3. Set Temperature Alert</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         st.session_state.alert_temp = c1.number_input("Alert Temperature (°C)", value=float(st.session_state.alert_temp), step=1.0, key=f"{ctx}_at")
         st.session_state.alert_type = c2.selectbox("Alert Type", ["Above", "Below"], index=["Above", "Below"].index(st.session_state.alert_type), key=f"{ctx}_aty")
@@ -1020,13 +1010,20 @@ def kpi(label, value, unit, sub, tone):
     )
 
 
+def check_live_alert(df):
+    """Send an alert email when the latest LIVE reading breaches the limit (throttled in handle_alert)."""
+    if df.empty or st.session_state.data_source != "ThingSpeak":
+        return
+    latest = df.iloc[-1]
+    age_min = (pd.Timestamp.now(tz=DISPLAY_TZ).tz_localize(None) - latest["ts"]).total_seconds() / 60
+    if 0 <= age_min <= st.session_state.ts_stale_minutes:
+        handle_alert(float(latest["core"]))
+
+
 def kpi_row(df):
     latest = df.iloc[-1]
     triggered, thr, typ = alert_state(float(latest["core"]))
-    if st.session_state.data_source == "ThingSpeak":
-        age_min = (pd.Timestamp.now(tz=DISPLAY_TZ).tz_localize(None) - latest["ts"]).total_seconds() / 60
-        if 0 <= age_min <= st.session_state.ts_stale_minutes:
-            handle_alert(float(latest["core"]))
+    check_live_alert(df)
     k1, k2, k3 = st.columns(3)
     with k1:
         badge = '<span class="badge badge-bad">Alert</span>' if triggered else '<span class="badge badge-ok">Normal</span>'
@@ -1178,22 +1175,35 @@ def page_compare():
 
 def page_upload():
     ss = st.session_state
-    card_upload("u")
-    df = get_data()
-    if not data_ready(df):
+    card_upload("u", title="Upload your file (CSV or Excel)", hint=False)
+    if ss.raw_df is None or ss.raw_df.empty:
+        return                                   # nothing else is shown until a file is uploaded
+    df = get_data("Uploaded File")               # always the uploaded file, whatever source is selected elsewhere
+    if df.empty:
         return
-    source_banner(df)
+    raw = ss.get("upload_raw")
     st.write("")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Readings loaded", f"{len(df):,}")
-    m2.metric("Duration", f"{df['elapsed'].iloc[-1]:.1f} h")
-    m3.metric("Core temp range", f"{df['core'].min():.1f} – {df['core'].max():.1f} °C")
+
+    interval = df["ts"].diff().dt.total_seconds().median()
+    interval_txt = "-" if not np.isfinite(interval) else (f"{interval / 60:.1f} min" if interval < 3600 else f"{interval / 3600:.1f} h")
     last_strength = df["strength"].iloc[-1]
-    m4.metric("Latest est. strength", f"{last_strength:.1f} MPa" if pd.notna(last_strength) else "N/A")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Rows used / rows in file", f"{len(df):,} / {len(raw) if raw is not None else len(df):,}")
+    m2.metric("Columns in file", f"{raw.shape[1]}" if raw is not None else "-")
+    m3.metric("Duration", f"{df['elapsed'].iloc[-1]:.1f} h ({df['elapsed'].iloc[-1] / 24:.1f} days)")
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Period", f"{df['ts'].iloc[0]:%d %b %Y} to {df['ts'].iloc[-1]:%d %b %Y}")
+    m5.metric("Reading interval", interval_txt)
+    m6.metric("Core temp range", f"{df['core'].min():.1f} – {df['core'].max():.1f} °C")
+    m7, m8, m9 = st.columns(3)
+    m7.metric("Peak core temperature", f"{df['core'].max():.1f} °C")
+    m8.metric("Latest maturity", f"{df['maturity'].iloc[-1]:,.0f} °C·hr")
+    m9.metric("Latest est. strength", f"{last_strength:.1f} MPa" if pd.notna(last_strength) else "N/A")
     st.write("")
+
     with st.container(border=True):
-        st.markdown('<div class="card-title">Dataset Overview</div>', unsafe_allow_html=True)
-        t_charts, t_proc, t_raw = st.tabs(["Charts", "Processed data", "Original file"])
+        st.markdown('<div class="card-title">Dataset Details</div>', unsafe_allow_html=True)
+        t_charts, t_stats, t_cols, t_proc, t_raw = st.tabs(["Charts", "Statistics", "Columns", "Processed data", "Original file"])
         with t_charts:
             st.plotly_chart(fig_live(df, 340), use_container_width=True)
             g1, g2 = st.columns(2)
@@ -1203,20 +1213,33 @@ def page_upload():
             with g2:
                 st.markdown("**Estimated strength (MPa)**")
                 st.plotly_chart(fig_strength(df), use_container_width=True)
+        with t_stats:
+            stats = df[["core", "surface", "ambient", "maturity", "strength"]].dropna(axis=1, how="all").describe().T.round(2)
+            stats.index = [{"core": "Core temp (°C)", "surface": "Surface temp (°C)", "ambient": "Ambient temp (°C)",
+                            "maturity": "Maturity (°C·hr)", "strength": "Strength (MPa)"}[i] for i in stats.index]
+            st.dataframe(stats.rename(columns={"count": "Count", "mean": "Mean", "std": "Std dev", "min": "Min", "max": "Max"}),
+                         use_container_width=True)
+        with t_cols:
+            if raw is not None:
+                info = pd.DataFrame({
+                    "Column": [str(c) for c in raw.columns],
+                    "Type": [str(t) for t in raw.dtypes],
+                    "Missing values": raw.isna().sum().values,
+                    "First value": [str(raw[c].dropna().iloc[0]) if raw[c].notna().any() else "-" for c in raw.columns],
+                })
+                st.dataframe(info, hide_index=True, use_container_width=True)
         with t_proc:
-            st.caption("Cleaned data used by every dashboard tab (timestamp, temperatures, maturity and strength).")
+            st.caption("Cleaned data used by every dashboard tab.")
             st.dataframe(df.head(500), hide_index=True, use_container_width=True)
         with t_raw:
-            if ss.get("upload_raw") is not None:
-                st.caption("Your file exactly as uploaded (all columns).")
-                st.dataframe(ss.upload_raw.head(500), hide_index=True, use_container_width=True)
-            else:
-                st.caption("No file uploaded yet. The data shown comes from the selected data source.")
-        st.caption(f"{len(df):,} rows · expected columns: timestamp, core_temp, surface_temp, ambient_temp")
-    b1, b2, _ = st.columns([1, 1, 3])
+            if raw is not None:
+                st.caption("Your file exactly as uploaded.")
+                st.dataframe(raw.head(500), hide_index=True, use_container_width=True)
+
+    b1, b2, b3, _ = st.columns([1, 1, 1, 2])
     b1.button("Open Dashboard", type="primary", use_container_width=True, key="u_go_dash", on_click=goto, args=("Dashboard",))
     b2.button("Download Report", use_container_width=True, key="u_go_rep", on_click=goto, args=("Download Report",))
-    if ss.raw_df is not None and st.button("Clear uploaded dataset"):
+    if b3.button("Clear dataset", use_container_width=True, key="u_clear"):
         ss.raw_df, ss.upload_name, ss.upload_raw = None, None, None
         ss.upload_signature = None
         ss.report_files = None
@@ -1226,137 +1249,74 @@ def page_upload():
 
 
 def page_alerts():
-    st.markdown(
-        '<div class="card-title">ThingSpeak Email Alert History</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Recent email notification records retrieved from ThingSpeak. "
-        "The ThingSpeak API retains alert history for seven days; when Supabase "
-        "is configured, records retrieved by this dashboard are archived there."
-    )
+    ss = st.session_state
+    df = get_data()
+    if not df.empty:
+        check_live_alert(df)      # keep email alerts working even if only this page is open
 
     history_df, history_error, archive_message = get_dashboard_alert_history()
 
-    if history_error:
-        st.warning(history_error)
-    if archive_message:
-        if archive_message.startswith("Could not"):
-            st.warning(archive_message)
-        else:
-            st.caption(archive_message)
-
-    if not history_df.empty:
-        h1, h2, h3 = st.columns(3)
-        h1.metric("Email alert records", len(history_df))
-        sent_count = (
-            history_df["status"].astype(str).str.lower().eq("sent").sum()
-            if "status" in history_df else 0
-        )
-        h2.metric("Reported as sent", int(sent_count))
-        h3.metric("Other statuses", int(len(history_df) - sent_count))
-
-        display_history = history_df.rename(columns={
-            "requested_at": "Requested At",
-            "sent_at": "Sent At",
-            "subject": "Email Subject",
-            "status": "Delivery Status",
-        })
-        st.dataframe(
-            display_history,
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.download_button(
-            "Download alert history CSV",
-            display_history.to_csv(index=False).encode("utf-8"),
-            file_name="thingspeak_alert_history.csv",
-            mime="text/csv",
-        )
-    elif not history_error:
-        st.info("No ThingSpeak email alert records were returned.")
-
-    st.divider()
-    df = get_data()
-
-    c1, c2 = st.columns([1, 1.6])
-    with c1:
-        card_alert("a")
+    # ---------- graph + alert settings
+    left, right = st.columns([1.7, 1])
+    with left:
         with st.container(border=True):
-            st.markdown(
-                '<div class="card-title">Email Notifications (ThingSpeak)</div>',
-                unsafe_allow_html=True,
-            )
-            st.session_state.email_enabled = st.toggle(
-                "Enable email alerts",
-                value=st.session_state.email_enabled,
-                key="a_email",
-            )
-            st.session_state.email_gap_min = st.number_input(
-                "Minimum minutes between emails",
-                min_value=1,
-                max_value=1440,
-                value=int(st.session_state.email_gap_min),
-                step=1,
-                key="a_email_gap",
-            )
-            if get_alert_key():
-                st.success(
-                    "ThingSpeak Alerts API Key is configured. "
-                    "This key is used for sending emails and reading alert history."
-                )
-            else:
-                st.warning(
-                    "Set THINGSPEAK_ALERT_KEY in Render Environment or "
-                    "Streamlit secrets to send emails and retrieve history."
-                )
-            if st.button(
-                "Send Test Email", key="a_test_email", use_container_width=True
-            ):
+            st.markdown('<div class="card-title">Core Temperature vs Alert Limit</div>', unsafe_allow_html=True)
+            if data_ready(df):
+                fig = fig_live(df, 380)
+                breach = df[df["core"] > ss.alert_temp] if ss.alert_type == "Above" else df[df["core"] < ss.alert_temp]
+                if not breach.empty:
+                    fig.add_trace(go.Scatter(x=breach["elapsed"], y=breach["core"], mode="markers", name="Alert readings",
+                                             marker=dict(color="#dc2626", size=7)))
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(f"{len(breach)} of {len(df)} readings are outside the limit ({ss.alert_type.lower()} {ss.alert_temp:.0f} °C).")
+    with right:
+        card_alert("a", "Set Temperature Alert")
+        with st.container(border=True):
+            st.markdown('<div class="card-title">Email Notifications</div>', unsafe_allow_html=True)
+            ss.email_enabled = st.toggle("Enable email alerts", value=ss.email_enabled, key="a_email")
+            ss.email_gap_min = st.number_input("Minimum minutes between emails", min_value=1, max_value=1440,
+                                               value=int(ss.email_gap_min), step=1, key="a_email_gap")
+            if not get_alert_key():
+                st.warning("Set THINGSPEAK_ALERT_KEY in the environment or Streamlit secrets to send emails and read alert history.")
+            if st.button("Send Test Email", key="a_test_email", use_container_width=True):
                 msg = "Concrete curing monitoring test alert: email is working."
                 status = send_email_alert("Concrete Monitor Test", msg)
-                st.session_state.alert_log.insert(0, {
-                    "Time": datetime.now().strftime("%d %b %H:%M"),
-                    "To": "Email (ThingSpeak)",
-                    "Status": status,
-                    "Message": msg,
-                })
+                ss.alert_log.insert(0, {"Time": datetime.now().strftime("%d %b %H:%M"), "To": "Email (ThingSpeak)",
+                                        "Status": status, "Message": msg})
                 if status == "Sent":
-                    st.success(f"Email request accepted by ThingSpeak: {status}")
+                    st.success("Test email accepted by ThingSpeak.")
                     fetch_thingspeak_alert_history.clear()
                 else:
                     st.error(f"Email status: {status}")
 
-    with c2:
-        if data_ready(df):
-            source_banner(df)
-            kpi_row(df)
-            st.write("")
-            with st.container(border=True):
-                st.markdown(
-                    '<div class="card-title">Core Temperature vs Alert Limit</div>',
-                    unsafe_allow_html=True,
-                )
-                st.plotly_chart(fig_live(df, 320), use_container_width=True)
-        else:
-            st.info(
-                "Sensor charts are unavailable until readings are available. "
-                "ThingSpeak email alert history above can still be viewed."
-            )
+    # ---------- messages that were sent
+    st.write("")
+    with st.container(border=True):
+        st.markdown('<div class="card-title">Alert Messages Sent</div>', unsafe_allow_html=True)
+        if history_error:
+            st.warning(history_error)
+        if archive_message and archive_message.startswith("Could not"):
+            st.warning(archive_message)
+        if not history_df.empty:
+            sent_count = int(history_df["status"].astype(str).str.lower().eq("sent").sum()) if "status" in history_df else 0
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Messages", len(history_df))
+            h2.metric("Reported as sent", sent_count)
+            h3.metric("Other statuses", len(history_df) - sent_count)
+            display_history = history_df.rename(columns={"requested_at": "Requested At", "sent_at": "Sent At",
+                                                         "subject": "Message Subject", "status": "Delivery Status"})
+            st.dataframe(display_history, hide_index=True, use_container_width=True)
+            st.download_button("Download message history (CSV)", display_history.to_csv(index=False).encode("utf-8"),
+                               file_name="thingspeak_alert_history.csv", mime="text/csv")
+        elif not history_error:
+            st.info("No alert messages have been sent yet.")
 
     with st.container(border=True):
-        st.markdown('<div class="card-title">Alerts Triggered by This Dashboard</div>',
-                    unsafe_allow_html=True)
-        if st.session_state.alert_log:
-            st.dataframe(
-                pd.DataFrame(st.session_state.alert_log),
-                hide_index=True,
-                use_container_width=True,
-            )
+        st.markdown('<div class="card-title">Alerts Triggered by This Dashboard</div>', unsafe_allow_html=True)
+        if ss.alert_log:
+            st.dataframe(pd.DataFrame(ss.alert_log), hide_index=True, use_container_width=True)
         else:
-            st.caption(
-                "No alerts have been triggered by this dashboard during the current session."
-            )
+            st.caption("No alerts have been triggered by this dashboard during the current session.")
 
 
 def page_cube():
@@ -1408,22 +1368,13 @@ FEATURES = [
 
 def page_home():
     ss = st.session_state
-    df = get_data()
     esc = _html.escape
 
-    # ---- Hero ----
-    if not df.empty:
-        latest = df.iloc[-1]
-        triggered, thr, typ = alert_state(float(latest["core"]))
-        state = f"Above the {thr:.0f} °C limit" if triggered and typ == "Above" else (
-            f"Below the {thr:.0f} °C limit" if triggered else "Within the alert limit")
-        reading = (f'<div class="hero-read"><div class="hr-label">Latest core temperature</div>'
-                   f'<div class="hr-val">{latest["core"]:.1f}<small>°C</small></div>'
-                   f'<div class="hr-sub">{state}<br>{latest["ts"]:%d %b %Y, %H:%M}</div></div>')
-    else:
-        reading = ('<div class="hero-read"><div class="hr-label">Latest core temperature</div>'
-                   '<div class="hr-val">--<small>°C</small></div>'
-                   '<div class="hr-sub">Awaiting readings. Choose a data source below<br>or upload a file.</div></div>')
+    # ---- Hero (information only: no live readings on this page) ----
+    reading = ('<div class="hero-read"><div class="hr-label">What it does</div><div class="hr-list">'
+               '<div>Tracks core, surface and ambient temperature</div>'
+               '<div>Calculates maturity with the Nurse–Saul method</div>'
+               '<div>Estimates strength, calibrated by cube tests</div></div></div>')
     st.markdown(
         f"""
 <div class="hero"><div class="hero-grid">
@@ -1436,7 +1387,6 @@ def page_home():
       <span class="chip">Project: {esc(str(ss.project))}</span>
       <span class="chip">Grade {esc(str(ss.grade))}</span>
       <span class="chip">Alert: {esc(str(ss.alert_type))} {ss.alert_temp:.0f} °C</span>
-      <span class="chip">Source: {esc(str(ss.data_source))}</span>
     </div>
   </div>
   {reading}
@@ -1445,9 +1395,9 @@ def page_home():
         unsafe_allow_html=True,
     )
     b1, b2, b3, _ = st.columns([1, 1, 1, 2.4])
-    b1.button("Open Dashboard", type="primary", use_container_width=True, key="h_go_dash", on_click=goto, args=("Dashboard",), icon=":material/dashboard:")
-    b2.button("Upload Dataset", use_container_width=True, key="h_go_up", on_click=goto, args=("Upload Dataset",), icon=":material/upload_file:")
-    b3.button("Download Report", use_container_width=True, key="h_go_rep", on_click=goto, args=("Download Report",), icon=":material/download:")
+    b1.button("Open Dashboard", type="primary", use_container_width=True, key="h_go_dash", on_click=goto, args=("Dashboard",))
+    b2.button("Upload Dataset", use_container_width=True, key="h_go_up", on_click=goto, args=("Upload Dataset",))
+    b3.button("Download Report", use_container_width=True, key="h_go_rep", on_click=goto, args=("Download Report",))
 
     # ---- About ----
     st.markdown('<div class="section-head">About this dashboard</div>'
@@ -1878,16 +1828,6 @@ def goto(p):
     st.session_state.page = p
 
 
-NAV_ICONS = {
-    "Home": ":material/home:",
-    "Dashboard": ":material/dashboard:",
-    "Upload Dataset": ":material/upload_file:",
-    "Temperature Alerts": ":material/notifications_active:",
-    "Cube Test Data": ":material/science:",
-    "Download Report": ":material/download:",
-    "Settings": ":material/settings:",
-}
-
 with st.sidebar:
     st.markdown(
         '<div class="brand"><div class="brand-logo">'
@@ -1900,7 +1840,7 @@ with st.sidebar:
     )
     current = st.session_state.page
     for name in SIDEBAR:
-        st.button(name, key=f"nav_{name}", use_container_width=True, icon=NAV_ICONS.get(name),
+        st.button(name, key=f"nav_{name}", use_container_width=True,
                   type="primary" if current == name else "secondary", on_click=goto, args=(name,))
     st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
     st.markdown(
@@ -1913,21 +1853,6 @@ with st.sidebar:
 # ============================================================== HEADER + TOP TABS
 page = st.session_state.page
 
-
-def on_top_nav(key):
-    st.session_state.page = TAB_TO_PAGE[st.session_state[key]]
-
-
-tab_key = f"topnav_{page}"
-top_left, top_right = st.columns([5, 1.2])
-with top_left:
-    st.radio(
-        "top-nav", TOP_TABS, horizontal=True, label_visibility="collapsed",
-        index=TOP_TABS.index(PAGE_TO_TAB[page]) if page in PAGE_TO_TAB else None,
-        key=tab_key, on_change=on_top_nav, args=(tab_key,),
-    )
-with top_right:
-    st.markdown(f"<div style='text-align:right;color:#5a6b7b;font-size:.85rem;padding-top:.5rem'>{_html.escape(str(st.session_state.operator))}</div>", unsafe_allow_html=True)
 
 source_options = ["ThingSpeak live", "Uploaded File", "Supabase", "Demo (sample data)"]
 # Apply programmatic changes before the widget is created (Streamlit requirement).
@@ -1947,7 +1872,11 @@ def render_source_selector():
     )
 
 
-if page != "Home":
+if page == "Upload Dataset":
+    # Nothing but the page title until a file has been uploaded.
+    st.markdown('<h1 class="page-title">Upload Dataset</h1>', unsafe_allow_html=True)
+    st.write("")
+elif page != "Home":
     render_source_selector()
     _df_hdr = get_data()
     h1, h2, h3 = st.columns([5, 1.3, 1.2])
