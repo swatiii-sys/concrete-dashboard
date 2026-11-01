@@ -368,6 +368,7 @@ def save_cube_calibration():
         return False, f"Save failed; records are not confirmed persistent: {exc}"
 
 load_cube_calibration()
+st.session_state.setdefault("cube_edit_mode", not bool(st.session_state.get("cube_saved")))
 
 # ============================================================== THEME / CSS
 st.markdown(
@@ -831,39 +832,96 @@ def card_alert(ctx):
 
 
 def card_cube_input(ctx):
+    # First entry is editable. After a successful save, records are locked until
+    # the user explicitly selects Edit Cube Test Data.
+    st.session_state.setdefault("cube_edit_mode", not bool(st.session_state.get("cube_saved")))
+    # Reset widget values before their widgets are instantiated (Streamlit requirement).
+    if st.session_state.pop(f"{ctx}_reset_cube_widgets", False):
+        for age in CUBE_AGES:
+            st.session_state[f"{ctx}_cube_{age}"] = float(st.session_state.cube_data.get(age, 0.0))
+            if age in st.session_state.cube_maturity:
+                st.session_state[f"{ctx}_maturity_edit_{age}"] = float(st.session_state.cube_maturity[age])
+            else:
+                st.session_state[f"{ctx}_maturity_{age}"] = 0.0
     with st.container(border=True):
         st.markdown('<div class="card-title">Add Cube Test Data (Compression)</div>', unsafe_allow_html=True)
-        st.caption("Enter actual measured cube strength (MPa). Maturity is automatically taken from the selected temperature history when it covers the cube testing age. If not, you may enter the actual recorded maturity manually. No maturity is invented.")
+        st.caption("Enter actual measured cube strength (MPa). Maturity is taken from the available temperature history when it covers the testing age. Otherwise, enter the actual recorded maturity manually. No maturity is invented.")
+
+        if st.session_state.cube_saved and not st.session_state.cube_edit_mode:
+            st.info("Saved cube test values are locked to prevent accidental changes.")
+            if st.button("Edit Cube Test Data", key=f"{ctx}_edit_cube", use_container_width=True):
+                st.session_state.cube_edit_mode = True
+                st.rerun()
+
+        editable = bool(st.session_state.cube_edit_mode)
         df = get_data()
         vals, maturities = {}, {}
         for age in CUBE_AGES:
             observed = maturity_at_age(df, age * 24, st.session_state.datum_temp, st.session_state.ref_temp) if not df.empty else np.nan
             stored = st.session_state.cube_maturity.get(age)
-            # Existing saved maturity takes precedence so later live-data changes do not silently rewrite a laboratory record.
+            # Keep an already saved laboratory maturity unchanged unless the user edits it.
             auto = float(stored) if stored is not None else (float(observed) if np.isfinite(observed) else None)
-            vals[age] = st.number_input(f"{age}-day measured strength (MPa)", min_value=0.0,
-                value=float(st.session_state.cube_data.get(age, 0.0)), step=0.1, key=f"{ctx}_cube_{age}")
+            vals[age] = st.number_input(
+                f"{age}-day measured strength (MPa)",
+                min_value=0.0,
+                value=float(st.session_state.cube_data.get(age, 0.0)),
+                step=0.1,
+                key=f"{ctx}_cube_{age}",
+                disabled=not editable,
+            )
             if auto is not None and auto > 0:
                 maturities[age] = auto
                 st.caption(f"{age}-day maturity: {auto:,.1f} °C·hr ({'saved calibration' if stored is not None else 'calculated from available temperature readings'})")
+                if editable and stored is not None:
+                    with st.expander(f"Change recorded {age}-day maturity (°C·hr)"):
+                        manual = st.number_input(
+                            f"Updated {age}-day maturity (°C·hr)",
+                            min_value=0.0, value=float(stored), step=10.0,
+                            key=f"{ctx}_maturity_edit_{age}",
+                        )
+                        if manual > 0:
+                            maturities[age] = manual
             else:
                 with st.expander(f"{age}-day maturity unavailable from recorded data — enter actual value if known"):
-                    manual = st.number_input(f"Recorded {age}-day maturity (°C·hr)", min_value=0.0,
-                        value=0.0, step=10.0, key=f"{ctx}_maturity_{age}")
+                    manual = st.number_input(
+                        f"Recorded {age}-day maturity (°C·hr)",
+                        min_value=0.0,
+                        value=float(st.session_state.cube_maturity.get(age, 0.0)),
+                        step=10.0,
+                        key=f"{ctx}_maturity_{age}",
+                        disabled=not editable,
+                    )
                     if manual > 0:
                         maturities[age] = manual
-        if st.button("Save Cube Test Data", type="primary", key=f"{ctx}_save", use_container_width=True):
-            old_data, old_maturity = dict(st.session_state.cube_data), dict(st.session_state.cube_maturity)
-            st.session_state.cube_data = {a: v for a, v in vals.items() if v > 0}
-            st.session_state.cube_maturity = {a: maturities[a] for a, v in vals.items() if v > 0 and a in maturities and maturities[a] > 0}
-            ok, message = save_cube_calibration()
-            if not ok:
-                st.session_state.cube_data, st.session_state.cube_maturity = old_data, old_maturity
-                st.error(message)
-            else:
-                st.session_state.cube_saved = True
-                st.session_state.cube_storage_message = message
-                st.rerun()
+
+        if editable:
+            b1, b2 = st.columns(2)
+            with b1:
+                save_label = "Save Cube Test Data" if not st.session_state.cube_saved else "Save Changes"
+                if st.button(save_label, type="primary", key=f"{ctx}_save", use_container_width=True):
+                    old_data, old_maturity = dict(st.session_state.cube_data), dict(st.session_state.cube_maturity)
+                    st.session_state.cube_data = {a: v for a, v in vals.items() if v > 0}
+                    st.session_state.cube_maturity = {
+                        a: maturities[a] for a, v in vals.items()
+                        if v > 0 and a in maturities and maturities[a] > 0
+                    }
+                    ok, message = save_cube_calibration()
+                    if not ok:
+                        st.session_state.cube_data, st.session_state.cube_maturity = old_data, old_maturity
+                        st.error(message)
+                    else:
+                        st.session_state.cube_saved = True
+                        st.session_state.cube_edit_mode = False
+                        st.session_state.cube_storage_message = message
+                        st.rerun()
+            if st.session_state.cube_saved:
+                with b2:
+                    if st.button("Cancel", key=f"{ctx}_cancel_edit", use_container_width=True):
+                        st.session_state.cube_edit_mode = False
+                        # Reset widget values on the next run, before widgets are created.
+                        st.session_state[f"{ctx}_reset_cube_widgets"] = True
+                        st.rerun()
+
         if st.session_state.get("cube_storage_error"):
             st.error("Could not load saved calibration: " + st.session_state.cube_storage_error)
         st.caption("Storage: " + st.session_state.get("cube_storage_backend", "Not yet verified"))
