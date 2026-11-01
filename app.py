@@ -253,7 +253,6 @@ DEFAULT_CUBE = {3: 18.5, 7: 27.3, 14: 35.8, 21: 42.1, 28: 48.7}
 # Sidebar pages and top-tab pages share one "page" state
 SIDEBAR = [
     "Home",
-    "Dashboard",
     "Live Monitoring",
     "Upload Dataset",
     "Temperature Alerts",
@@ -1094,38 +1093,6 @@ def card_strength_table(cmp):
 
 
 # ============================================================== PAGES
-def page_dashboard():
-    c1, c2, c3, c4 = st.columns([1.15, 1, 1.15, 2.1])
-    with c1: card_upload("d")
-    with c2: card_grade("d")
-    with c3: card_alert("d")
-    with c4: card_cube_input("d")
-    df = get_data()
-    if not data_ready(df):
-        return
-    cmp = comparison_df(df)
-    source_banner(df)
-    st.write("")
-    kpi_row(df)
-    st.write("")
-    g1, g2, g3 = st.columns([1.25, 1.15, 1])
-    with g1:
-        with st.container(border=True):
-            st.markdown('<div class="card-title">Live Sensor Data (Temperature)</div>', unsafe_allow_html=True)
-            st.plotly_chart(fig_live(df), use_container_width=True)
-    with g2:
-        with st.container(border=True):
-            st.markdown('<div class="card-title">Strength Comparison</div>', unsafe_allow_html=True)
-            st.plotly_chart(fig_compare(cmp), use_container_width=True)
-    with g3:
-        card_cube_table()
-    st.write("")
-    b1, b2, b3 = st.columns([1.6, 1, 1.1])
-    with b1: card_monitoring_table(df)
-    with b2: card_calculator("d")
-    with b3: card_strength_table(cmp)
-
-
 def page_live():
     def body():
         df = get_data()
@@ -1236,18 +1203,22 @@ def page_upload():
                 st.caption("Your file exactly as uploaded.")
                 st.dataframe(raw.head(500), hide_index=True, use_container_width=True)
 
-    b1, b2, b3, _ = st.columns([1, 1, 1, 2])
-    b1.button("Open Dashboard", type="primary", use_container_width=True, key="u_go_dash", on_click=goto, args=("Dashboard",))
-    b2.button("Download Report", use_container_width=True, key="u_go_rep", on_click=goto, args=("Download Report",))
-    if b3.button("Clear dataset", use_container_width=True, key="u_clear"):
-        ss.raw_df, ss.upload_name, ss.upload_raw = None, None, None
-        ss.upload_signature = None
-        ss.report_files = None
-        ss.source_choice = "ThingSpeak live"
-        ss["_sync_source_choice_widget"] = True
-        st.rerun()
-
-
+    st.write("")
+    calc_col, next_col = st.columns([1.3, 1])
+    with calc_col:
+        card_calculator("u")
+    with next_col:
+        with st.container(border=True):
+            st.markdown('<div class="card-title">Next steps</div>', unsafe_allow_html=True)
+            st.button("Open Live Monitoring", type="primary", use_container_width=True, key="u_go_live", on_click=goto, args=("Live Monitoring",))
+            st.button("Download Report", use_container_width=True, key="u_go_rep", on_click=goto, args=("Download Report",))
+            if st.button("Clear dataset", use_container_width=True, key="u_clear"):
+                ss.raw_df, ss.upload_name, ss.upload_raw = None, None, None
+                ss.upload_signature = None
+                ss.report_files = None
+                ss.source_choice = "ThingSpeak live"
+                ss["_sync_source_choice_widget"] = True
+                st.rerun()
 def page_alerts():
     ss = st.session_state
     df = get_data()
@@ -1395,7 +1366,7 @@ def page_home():
         unsafe_allow_html=True,
     )
     b1, b2, b3, _ = st.columns([1, 1, 1, 2.4])
-    b1.button("Open Dashboard", type="primary", use_container_width=True, key="h_go_dash", on_click=goto, args=("Dashboard",))
+    b1.button("Live Monitoring", type="primary", use_container_width=True, key="h_go_dash", on_click=goto, args=("Live Monitoring",))
     b2.button("Upload Dataset", use_container_width=True, key="h_go_up", on_click=goto, args=("Upload Dataset",))
     b3.button("Download Report", use_container_width=True, key="h_go_rep", on_click=goto, args=("Download Report",))
 
@@ -1799,7 +1770,6 @@ def page_report():
 
 PAGE_FUNCS = {
     "Home": page_home,
-    "Dashboard": page_dashboard,
     "Live Monitoring": page_live,
     "Cube Test Comparison": page_compare,
     "Upload Dataset": page_upload,
@@ -1810,7 +1780,6 @@ PAGE_FUNCS = {
 }
 PAGE_SUBTITLE = {
     "Home": "Welcome to the concrete curing monitoring system.",
-    "Dashboard": "Monitor live sensor data, compare with cube test results and track maturity & strength.",
     "Live Monitoring": "Real-time temperature, maturity and predicted strength from the embedded sensors.",
     "Cube Test Comparison": "Compare maturity-based live strength against lab cube compression results.",
     "Upload Dataset": "Load a CSV or Excel file of sensor readings to drive the whole dashboard.",
@@ -1881,7 +1850,7 @@ elif page != "Home":
     _df_hdr = get_data()
     h1, h2, h3 = st.columns([5, 1.3, 1.2])
     with h1:
-        title = "Concrete Curing & Strength Monitoring Dashboard" if page == "Dashboard" else page
+        title = page
         st.markdown(f'<h1 class="page-title">{title}</h1><p class="page-sub">{PAGE_SUBTITLE[page]}</p>', unsafe_allow_html=True)
     with h2:
         st.markdown(f'<div class="upd">Last Sensor Reading<br><b>{_df_hdr["ts"].iloc[-1].strftime("%Y-%m-%d %H:%M") if not _df_hdr.empty else "Awaiting readings"}</b></div>', unsafe_allow_html=True)
